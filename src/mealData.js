@@ -6,7 +6,8 @@ export const INGREDIENT_CATEGORIES = {
     "돼지 다짐육",
     "돼지고기",
     "소고기 불고기용",
-    "소고기"
+    "소고기",
+    "차돌박이"
   ],
   "해물": [
     "냉동 생선살",
@@ -18,7 +19,9 @@ export const INGREDIENT_CATEGORIES = {
     "바지락",
     "멸치",
     "북어",
-    "어묵"
+    "어묵",
+    "게맛살",
+    "참치"
   ],
   "유제품·계란": [
     "계란",
@@ -29,7 +32,8 @@ export const INGREDIENT_CATEGORIES = {
   "가공식품": [
     "햄/소시지",
     "스팸",
-    "베이컨"
+    "베이컨",
+    "잠봉"
   ],
   "채소": [
     "무",
@@ -291,6 +295,24 @@ export const MENUS = [
     recipe: [["풀기", "계란+물 1:1"], ["간", "새우젓·파"], ["찌기", "약불 부풀리기"]] },
   { name: "멸치볶음", role: "banchan", tag: "반찬", emoji: "🐟", ingredients: ["멸치"], allIngredients: ["멸치", "땅콩"], req: [], time: 12, servings: 6, level: "쉬움",
     recipe: [["손질", "풋고추, 홍고추, 마늘, 실파, 생강(분쇄)은 먹기 좋게 썬다."], ["조리", "멸치, 땅콩, 풋고추, 홍고추를 각각 볶는다."], ["마무리", "양념장에 멸치, 땅콩을 넣고 약한 불에서 조린 후 풋고추, 홍고 추, 참깨, 참기름을 넣고 한 번 더 조린다."]] },
+  { name: "차돌된장찌개", role: "guk", tag: "국·찌개", emoji: "🍲", ingredients: ["차돌박이"], allIngredients: ["차돌박이", "두부", "애호박", "대파"], req: ["차돌박이"], time: 20, servings: 4, level: "쉬움",
+    recipe: [["볶기", "차돌박이를 냄비에 살짝 볶는다."], ["끓이기", "물을 붓고 된장을 풀어 끓인다."], ["마무리", "두부·애호박·대파를 넣고 한소끔 끓인다."]] },
+  { name: "차돌숙주볶음", role: "main", tag: "메인반찬", emoji: "🥩", ingredients: ["차돌박이"], allIngredients: ["차돌박이", "숙주", "대파"], req: ["차돌박이"], time: 15, servings: 3, level: "쉬움",
+    recipe: [["달구기", "팬을 뜨겁게 달군다."], ["볶기", "차돌박이를 굽듯이 볶는다."], ["마무리", "숙주·대파 넣고 간장으로 간한다."]] },
+  { name: "차돌박이구이", role: "main", tag: "메인반찬", emoji: "🥩", ingredients: ["차돌박이"], allIngredients: ["차돌박이"], req: ["차돌박이"], time: 10, servings: 2, level: "쉬움",
+    recipe: [["달구기", "팬을 센 불로 달군다."], ["굽기", "차돌박이를 앞뒤로 굽는다."], ["곁들임", "소금·후추, 파무침을 곁들인다."]] },
+  { name: "잠봉뵈르", role: "specialty", tag: "별미", emoji: "🥪", ingredients: ["잠봉"], allIngredients: ["잠봉", "버터", "바게트"], req: ["잠봉"], needShopping: true, shoppingItems: ["바게트", "버터"], time: 10, servings: 2, level: "쉬움",
+    recipe: [["바르기", "바게트를 갈라 버터를 바른다."], ["올리기", "잠봉을 듬뿍 올린다."], ["마무리", "취향껏 허브나 후추를 뿌린다."]] },
+  { name: "잠봉계란샌드", role: "specialty", tag: "별미", emoji: "🥪", ingredients: ["잠봉"], allIngredients: ["잠봉", "계란", "식빵"], req: ["잠봉", "계란"], needShopping: true, shoppingItems: ["식빵"], time: 15, servings: 2, level: "쉬움",
+    recipe: [["부치기", "계란을 도톰하게 부친다."], ["조립", "식빵에 잠봉·계란을 올린다."], ["마무리", "반으로 잘라 담는다."]] },
+  { name: "참치김치찌개", role: "guk", tag: "국·찌개", emoji: "🍲", ingredients: ["참치"], allIngredients: ["참치", "김치", "두부", "대파"], req: ["참치"], spicy: true, time: 20, servings: 4, level: "쉬움",
+    recipe: [["볶기", "김치를 참기름에 볶는다."], ["끓이기", "물을 붓고 참치를 통째로 넣어 끓인다."], ["마무리", "두부·대파를 넣고 한소끔 더 끓인다."]] },
+  { name: "참치전", role: "banchan", tag: "반찬", emoji: "🐟", ingredients: ["참치"], allIngredients: ["참치", "계란", "부침가루"], req: ["참치", "계란"], time: 15, servings: 3, level: "쉬움",
+    recipe: [["섞기", "기름 뺀 참치에 계란·부침가루를 섞는다."], ["반죽", "한 숟갈씩 동그랗게 모양낸다."], ["부치기", "기름 두른 팬에 노릇하게 부친다."]] },
+  { name: "참치연두부비빔밥", role: "bap", tag: "밥·덮밥", emoji: "🍚", ingredients: ["참치"], allIngredients: ["참치", "연두부", "계란", "김"], req: ["참치"], needShopping: true, shoppingItems: ["연두부"], time: 10, servings: 1, level: "쉬움",
+    recipe: [["담기", "밥 위에 연두부를 부드럽게 올린다."], ["올리기", "기름 뺀 참치를 얹는다."], ["마무리", "간장·참기름·김가루를 뿌려 비빈다."]] },
+  { name: "참치마요덮밥", role: "bap", tag: "밥·덮밥", emoji: "🍚", needShopping: true, ingredients: ["참치"], allIngredients: ["참치", "계란", "마요네즈"], req: ["참치", "계란"], time: 10, servings: 1, level: "쉬움", shoppingItems: ["마요네즈"],
+    recipe: [["볶기", "참치를 살짝 볶아 기름기를 날린다."], ["올리기", "밥 위에 참치와 계란프라이를 올린다."], ["마무리", "마요네즈·간장을 뿌린다."]] },
   { name: "김치전", role: "banchan", tag: "반찬", emoji: "🥬", ingredients: ["김치"], allIngredients: ["김치", "부침가루"], req: [], spicy: true, time: 15, servings: 3, level: "쉬움",
     recipe: [["썰기", "김치를 잘게 썬다."], ["반죽", "부침가루·물과 섞는다."], ["부치기", "기름 두른 팬에 노릇하게 부친다."]] },
   { name: "김치볶음", role: "banchan", tag: "반찬", emoji: "🥬", ingredients: ["김치"], allIngredients: ["김치", "대파"], req: [], spicy: true, time: 10, servings: 4, level: "쉬움",

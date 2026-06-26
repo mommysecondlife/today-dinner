@@ -1,0 +1,117 @@
+@import "tailwindcss";
+
+/* MEMO 칸과 외식 day 칸이 항상 같은 색을 쓰도록 공용 변수로 정의 */
+:root {
+  --color-rest-day: #edf3e1; /* 연한 초록 배경 (MEMO·외식 day 공통) */
+  --color-rest-day-border: #c9d9ae; /* 공통 테두리 */
+  --color-rest-day-ink: #6e8b4f; /* 공통 글씨 톤 (sage) */
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("./fonts/Paperlogy-4Regular.ttf") format("truetype");
+  font-weight: 400;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("./fonts/Paperlogy-5Medium.ttf") format("truetype");
+  font-weight: 500;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: "Paperlogy";
+  src: url("./fonts/Paperlogy-7Bold.ttf") format("truetype");
+  font-weight: 700;
+  font-style: normal;
+  font-display: swap;
+}
+
+body {
+  font-family: "Paperlogy", system-ui, sans-serif;
+}
+
+/* 냉장고 — 재료 담기 인터랙션 애니메이션 */
+@keyframes floatUp {
+  0% {
+    opacity: 0;
+    transform: translate(-50%, 0) scale(0.6);
+  }
+  25% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: translate(-50%, -34px) scale(1.15);
+  }
+}
+.float-up {
+  animation: floatUp 0.6s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+}
+
+@keyframes sheetUp {
+  from {
+    transform: translateY(100%);
+  }
+  to {
+    transform: translateY(0);
+  }
+}
+.sheet-up {
+  animation: sheetUp 0.32s cubic-bezier(0.22, 1, 0.36, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+.fade-in {
+  animation: fadeIn 0.25s ease forwards;
+}
+
+/* 로딩 — 통통 튀는 음식 이모지 */
+@keyframes bounceFood {
+  0%,
+  100% {
+    transform: translateY(0);
+  }
+  50% {
+    transform: translateY(-12px);
+  }
+}
+.bounce-food {
+  animation: bounceFood 0.7s ease-in-out infinite;
+}
+
+/* 결과 등장 — 살짝 떠오르며 페이드인 (짠!) */
+@keyframes planIn {
+  from {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+.plan-in {
+  animation: planIn 0.5s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .float-up,
+  .sheet-up,
+  .fade-in,
+  .bounce-food,
+  .plan-in {
+    animation: none !important;
+  }
+}

@@ -787,11 +787,11 @@ export default function RealHomeMeal() {
                 </button>
               </div>
 
-              {/* 이번 주 장보기 리스트 */}
-              <ShoppingListSection items={shoppingList} />
-
-              {/* 재료 하나만 더 사면 — 딱 하나 부족한 메뉴 (담은 재료/메뉴 없으면 자동 숨김) */}
+              {/* 재료 하나만 더 사면 — 딱 하나 부족한 메뉴 (문제→해결책 흐름: 메인 없음 다음에 바로) */}
               <OneMoreSection groups={oneMoreGroups} onOpen={setActiveMenu} />
+
+              {/* 이번 주 장보기 리스트 (해결책 다음 → 실제 살 것) */}
+              <ShoppingListSection items={shoppingList} />
 
               <p className="pb-1 text-center text-[12px]" style={{ color: C.sub }}>엄마도 매일 잘 해내고 있어요 🍀</p>
             </div>

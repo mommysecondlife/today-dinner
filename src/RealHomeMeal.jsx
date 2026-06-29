@@ -246,6 +246,9 @@ const missingIngredients = (menu, selectedSet) => {
   return out;
 };
 
+// 데이터 role → 한글 자리(밥/국/메인/반찬/별미). 추천 메뉴 꽂기에서 같은 역할 자리 매칭에 사용.
+const ROLE_KO = { bap: "밥", guk: "국", main: "메인", banchan: "반찬", specialty: "별미" };
+
 // 역할 태그 색 (별미 강조에 사용)
 const ROLE_STYLE = {
   "별미": { bg: "#EDE3F3", fg: "#7A5AA6" },
@@ -538,7 +541,9 @@ export default function RealHomeMeal() {
       const totalMin = cook.length ? Math.max(...cook.map((it) => getMeta(it.menu).min)) + (cook.length - 1) * 3 : 0;
       return { day: d.day, mealName: primaryMeal, items, totalMin };
     });
-  }, [selected, meals, restDays, specialFreq, excludeSpicy, regen]); // eslint-disable-line react-hooks/exhaustive-deps
+    // 의존성은 regen만 — "식단 짜기/다시 짜기"로만 새로 생성(스냅샷). 추천 메뉴 꽂기로 selected가 바뀌어도
+    // 전체 식단이 다시 섞이지 않게(=꽂은 칸만 바뀌게) 한다. 생성 시점의 selected/설정값은 클로저로 읽음.
+  }, [regen]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 칸별 "바꾸기" — 이미 짜인 식단표에서 메뉴 한 칸만 같은 역할의 다른 메뉴로 교체 ───
   //  generateWeekPlan/매칭/데이터는 건드리지 않고, baseWeekPlan 위에 override만 덮어씌운다.
@@ -552,31 +557,54 @@ export default function RealHomeMeal() {
     return { 밥: SWAP_RICE, 국: byRole("guk"), 메인: byRole("main"), 반찬: byRole("banchan") };
   }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 칸 교체 override: { "요일|아이템index": 새메뉴이름 }. 식단 다시 짜면(=base가 바뀌면) 초기화.
+  // 칸 교체 override: { "요일|아이템index": 새메뉴이름 }. 추천 메뉴 꽂기 override: { "요일|역할": 메뉴이름 }.
+  //  둘 다 base가 새로 생성될 때(=다시 짜기)만 초기화.
   const [cellSwaps, setCellSwaps] = useState({});
+  const [planInserts, setPlanInserts] = useState({}); // 추천 메뉴를 특정 요일·역할 자리에 꽂기
   useEffect(() => {
     setCellSwaps({});
-  }, [selected, meals, restDays, specialFreq, excludeSpicy, regen]);
+    setPlanInserts({});
+  }, [regen]);
 
-  // baseWeekPlan + cellSwaps → 실제로 렌더/장보기/추천에 쓰는 weekPlan
+  // baseWeekPlan + cellSwaps + planInserts → 실제로 렌더/장보기/추천에 쓰는 weekPlan
   const weekPlan = useMemo(() => {
     return baseWeekPlan.map((d) => {
+      // 별미 꽂기 — 그 날을 별미 날로 (추천이 별미일 때만, 보통은 안 쓰임)
+      const specialMenu = planInserts[`${d.day}|별미`];
+      if (specialMenu) {
+        const m = MENU_BY_NAME[specialMenu];
+        return {
+          day: d.day,
+          special: true,
+          mealName: d.mealName || "저녁",
+          sp: { menu: specialMenu, emoji: getEmoji(specialMenu), tag: m?.tag, shop: missingIngredients(m, new Set(selected)), min: getMeta(specialMenu).min },
+        };
+      }
       if (d.rest || d.special || !d.items) return d;
-      let changed = false;
-      const items = d.items.map((it, i) => {
+
+      const hasSwap = Object.keys(cellSwaps).some((k) => k.startsWith(`${d.day}|`));
+      const hasInsert = ["밥", "국", "메인", "반찬"].some((r) => planInserts[`${d.day}|${r}`]);
+      if (!hasSwap && !hasInsert) return d;
+
+      // 1) 칸 바꾸기(index 기반)
+      let items = d.items.map((it, i) => {
         const sw = cellSwaps[`${d.day}|${i}`];
-        if (sw && !it.placeholder && sw !== it.menu) {
-          changed = true;
-          return { ...it, menu: sw };
-        }
-        return it;
+        return sw && !it.placeholder && sw !== it.menu ? { ...it, menu: sw } : it;
       });
-      if (!changed) return d;
+      // 2) 추천 메뉴 꽂기(역할 기반) — 같은 역할 자리 교체, 없으면 추가
+      ["밥", "국", "메인", "반찬"].forEach((role) => {
+        const ins = planInserts[`${d.day}|${role}`];
+        if (!ins) return;
+        const idx = items.findIndex((it) => it.role === role);
+        if (idx >= 0) items = items.map((it, i) => (i === idx ? { role, menu: ins } : it));
+        else items = [...items, { role, menu: ins }];
+      });
+
       const cook = items.filter((it) => !it.placeholder);
       const totalMin = cook.length ? Math.max(...cook.map((it) => getMeta(it.menu).min)) + (cook.length - 1) * 3 : 0;
       return { ...d, items, totalMin };
     });
-  }, [baseWeekPlan, cellSwaps]);
+  }, [baseWeekPlan, cellSwaps, planInserts, selected]);
 
   // 🔄 버튼 핸들러 — 같은 역할의 다른 메뉴로 교체 (이번 주 다른 칸에 안 나온 메뉴 우선)
   const swapCell = useCallback(
@@ -607,6 +635,43 @@ export default function RealHomeMeal() {
   );
 
   const cookingDays = weekPlan.filter((d) => !d.rest).length;
+
+  // ─── 추천 메뉴 → 선택한 요일 식단에 바로 꽂기 (+ 부족 재료 자동 담기) ───
+  const [pickDayFor, setPickDayFor] = useState(null); // 요일 선택 모달에 띄울 추천 메뉴명
+  const [insertToast, setInsertToast] = useState(null); // 짧은 확인 메시지
+  useEffect(() => {
+    if (!insertToast) return;
+    const t = setTimeout(() => setInsertToast(null), 2800);
+    return () => clearTimeout(t);
+  }, [insertToast]);
+
+  const insertRecommendedMenu = useCallback(
+    (menuName, dayName) => {
+      const m = MENU_BY_NAME[menuName];
+      if (!m) return;
+      // a) 부족 재료를 "샀다 치고" 냉장고(selected)에 담기 → 매칭/장보기에 반영
+      const sel = new Set(selected);
+      const missing = (m.req || []).filter((i) => !sel.has(i) && !PANTRY.has(i));
+      if (missing.length) setSelected((prev) => { const s = new Set(prev); missing.forEach((i) => s.add(i)); return [...s]; });
+      // b) 메뉴 role에 맞는 자리에 꽂기 (별미면 그 날을 별미 날로)
+      const ko = ROLE_KO[m.role] || "메인";
+      setPlanInserts((prev) => {
+        const next = { ...prev };
+        if (ko === "별미") {
+          Object.keys(next).forEach((k) => { if (k.startsWith(`${dayName}|`)) delete next[k]; });
+          next[`${dayName}|별미`] = menuName;
+        } else {
+          delete next[`${dayName}|별미`];
+          next[`${dayName}|${ko}`] = menuName;
+        }
+        return next;
+      });
+      // c) 확인 메시지
+      setInsertToast(`${dayName}요일에 '${menuName}' 넣었어요!${missing.length ? ` (${missing.join(", ")} 담았어요 🛒)` : ""}`);
+      setPickDayFor(null);
+    },
+    [selected]
+  );
 
   // 이번 주(월~일) 실제 날짜 — 앱 여는 시점(new Date()) 기준, 월요일 시작. { 월: "6/29", 화: "6/30", ... }
   const weekDates = useMemo(() => {
@@ -910,7 +975,7 @@ export default function RealHomeMeal() {
               </div>
 
               {/* 🛒 장보기 — 냉장고에 있는 것 / 사야 할 것 / 하나만 더 사면 되는 메뉴를 한 흐름으로 */}
-              <ShoppingHub fridge={selected} shopItems={shoppingList} oneMoreGroups={oneMoreGroups} onOpen={setActiveMenu} />
+              <ShoppingHub fridge={selected} shopItems={shoppingList} oneMoreGroups={oneMoreGroups} onPickMenu={setPickDayFor} />
 
               <p className="pb-1 text-center text-[12px]" style={{ color: C.sub }}>엄마도 매일 잘 해내고 있어요 🍀</p>
             </div>
@@ -1045,6 +1110,38 @@ export default function RealHomeMeal() {
       />
 
       {activeMenu && <RecipeModal menu={activeMenu} onClose={() => setActiveMenu(null)} />}
+
+      {/* 추천 메뉴 → 요일 선택 시트 (집밥 날만, 같은 역할 자리 미리보기) */}
+      {pickDayFor &&
+        (() => {
+          const role = ROLE_KO[MENU_BY_NAME[pickDayFor]?.role] || "메인";
+          const days = weekPlan
+            .filter((d) => !d.rest && !d.special)
+            .map((d) => ({
+              day: d.day,
+              date: weekDates[d.day],
+              current: role === "별미" ? null : ((d.items || []).find((it) => it.role === role && !it.placeholder)?.menu || null),
+            }));
+          return (
+            <DayPickerSheet
+              menu={pickDayFor}
+              role={role}
+              days={days}
+              onPick={(day) => insertRecommendedMenu(pickDayFor, day)}
+              onClose={() => setPickDayFor(null)}
+              reduced={reducedMotion}
+            />
+          );
+        })()}
+
+      {/* 식단에 넣었어요 — 짧은 확인 토스트 */}
+      {insertToast && (
+        <div className="pointer-events-none fixed inset-x-0 z-[60] flex justify-center px-4" style={{ bottom: 92 }}>
+          <div className="rounded-full px-4 py-2.5 text-[12.5px] font-semibold shadow-lg" style={{ background: C.ink, color: "#FFF" }}>
+            ✅ {insertToast}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1205,7 +1302,7 @@ function PlanControls({ meals, onToggleMeal, restDays, onToggleRestDay, specialF
 
 // 🛒 장보기 허브 — 한 카드 안에 (a)냉장고에 있는 것 / (b)사야 할 것 / (c)하나만 더 사면 되는 메뉴
 //  각 소제목으로 구분해 "장보기"라는 한 흐름으로 읽히게. 기능·로직·링크는 기존 그대로.
-function ShoppingHub({ fridge, shopItems, oneMoreGroups, onOpen }) {
+function ShoppingHub({ fridge, shopItems, oneMoreGroups, onPickMenu }) {
   const Divider = () => <div className="my-4 h-px" style={{ background: `${C.gold}22` }} />;
   return (
     <section className="rounded-3xl p-5" style={{ background: C.card, border: `1px solid ${C.gold}40` }}>
@@ -1270,7 +1367,7 @@ function ShoppingHub({ fridge, shopItems, oneMoreGroups, onOpen }) {
           <div>
             <h3 className="text-[13.5px] font-bold" style={{ color: C.ink }}>➕ 하나만 더 사면 되는 메뉴</h3>
             <p className="mb-2 mt-0.5 text-[11.5px]" style={{ color: C.sub }}>
-              딱 하나만 더 있으면 만들 수 있어요 · 재료를 톡 누르면 쿠팡 검색
+              재료를 톡 누르면 쿠팡 검색 · 메뉴를 톡 누르면 이번 주 식단에 넣기
             </p>
             <div className="space-y-3">
               {oneMoreGroups.map((g) => (
@@ -1287,11 +1384,13 @@ function ShoppingHub({ fridge, shopItems, oneMoreGroups, onOpen }) {
                     {g.menus.map((menu) => (
                       <button
                         key={menu}
-                        onClick={() => onOpen(menu)}
-                        className="inline-flex items-center gap-1 rounded-full bg-white py-1.5 px-3 text-[12.5px] font-medium transition-all"
+                        onClick={() => onPickMenu(menu)}
+                        title="이번 주 식단에 넣기"
+                        className="inline-flex items-center gap-1 rounded-full bg-white py-1.5 px-3 text-[12.5px] font-medium transition-all hover:opacity-80"
                         style={{ color: C.ink, border: `1px solid ${C.line}` }}
                       >
                         {getEmoji(menu)} {menu}
+                        <span className="text-[11px]" style={{ color: C.gold }}>＋</span>
                       </button>
                     ))}
                   </div>
@@ -1309,6 +1408,54 @@ function ShoppingHub({ fridge, shopItems, oneMoreGroups, onOpen }) {
         </p>
       )}
     </section>
+  );
+}
+
+// 📅 추천 메뉴를 넣을 요일 고르기 (바텀시트) — 집밥 날만, 같은 역할 자리에 들어감을 미리보기
+function DayPickerSheet({ menu, role, days, onPick, onClose, reduced }) {
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center" onClick={onClose}>
+      <div className="absolute inset-0" style={{ background: "rgba(40,28,20,0.45)" }} />
+      <div
+        onClick={(e) => e.stopPropagation()}
+        className={`relative w-full max-w-[480px] rounded-t-3xl px-5 pb-7 pt-4 ${reduced ? "" : "sheet-up"}`}
+        style={{ background: C.card }}
+      >
+        <div className="mx-auto mb-3 h-1 w-10 rounded-full" style={{ background: C.line }} />
+        <h3 className="text-[16px] font-bold" style={{ color: C.ink }}>{getEmoji(menu)} {menu}</h3>
+        <p className="mb-3.5 mt-1 text-[12.5px]" style={{ color: C.sub }}>
+          어느 요일 <b style={{ color: C.gold }}>{role}</b> 자리에 넣을까요?
+        </p>
+        {days.length === 0 ? (
+          <p className="py-6 text-center text-[12.5px]" style={{ color: C.sub }}>넣을 수 있는 집밥 날이 없어요 🍴</p>
+        ) : (
+          <div className="grid grid-cols-2 gap-2">
+            {days.map((d) => (
+              <button
+                key={d.day}
+                onClick={() => onPick(d.day)}
+                className="flex flex-col items-start rounded-2xl px-3.5 py-2.5 text-left transition-all hover:opacity-90"
+                style={{ background: C.canvas, border: `1px solid ${C.line}` }}
+              >
+                <span className="text-[13px] font-extrabold" style={{ color: C.ink }}>
+                  {d.day}요일 <span className="text-[10.5px] font-bold" style={{ color: C.sub }}>{d.date}</span>
+                </span>
+                <span className="mt-0.5 text-[11px] leading-tight" style={{ color: C.sub }}>
+                  {d.current ? `${d.current} → 교체` : `${role} 자리에 추가`}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+        <button
+          onClick={onClose}
+          className="mt-4 w-full rounded-2xl py-2.5 text-[13px] font-semibold"
+          style={{ background: "#fff", color: C.sub, border: `1px solid ${C.line}` }}
+        >
+          닫기
+        </button>
+      </div>
+    </div>
   );
 }
 

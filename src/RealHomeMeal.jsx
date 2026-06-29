@@ -484,11 +484,12 @@ export default function RealHomeMeal() {
   const baseWeekPlan = useMemo(() => {
     const base = generateWeekPlan(MENUS, selected, { eatOutDays: restDays, excludeSpicy, meals });
 
-    // 색다른(별미) — needShopping 단품. 슬라이더 빈도만큼 집밥 날에 분산.
-    const selSet = new Set(selected);
+    // 색다른(별미) — needShopping 단품. 슬라이더 빈도만큼 집밥 날에 분산. 단, 저녁이 선택됐을 때만(저녁 자리에 들어감).
     const cookingList = base.filter((d) => !d.eatOut).map((d) => d.day);
+    const dinnerSelected = meals.includes("저녁");
     const wantDanpum =
-      specialFreq === "none" ? 0
+      !dinnerSelected ? 0
+      : specialFreq === "none" ? 0
       : specialFreq === "sometimes" ? 1
       : specialFreq === "often" ? 2
       : 3 + Math.floor(Math.random() * 2); // veryOften: 3~4
@@ -518,17 +519,8 @@ export default function RealHomeMeal() {
     // generateWeekPlan 결과 → 렌더용 구조로 변환 (+ 별미 덮어쓰기)
     return base.map((d) => {
       if (d.eatOut) return { day: d.day, rest: true };
-      if (danpumDays.has(d.day)) {
-        const m = pickDanpum();
-        if (m) {
-          return {
-            day: d.day,
-            special: true,
-            mealName: primaryMeal,
-            sp: { menu: m.name, emoji: getEmoji(m.name), tag: m.tag, shop: missingIngredients(m, selSet), min: getMeta(m.name).min },
-          };
-        }
-      }
+      // 별미는 "저녁"에만 — 저녁이 있는 집밥 날에만 저녁 자리를 별미로 대체. 아침·점심은 평범하게.
+      const danpumMenu = danpumDays.has(d.day) && d.byMeal?.["저녁"] ? pickDanpum() : null;
       // 끼니별 한 상 → 칩 렌더용 items 배열로 (각 item에 meal 태그). 끼니 순서: 아침→점심→저녁.
       const items = [];
       const mealsInDay = [];
@@ -536,6 +528,11 @@ export default function RealHomeMeal() {
         const mm = d.byMeal?.[meal];
         if (!mm) return;
         mealsInDay.push(meal);
+        if (meal === "저녁" && danpumMenu) {
+          // 저녁 자리에 별미 단품 (⭐). 아침·점심은 위에서 평범하게 채워짐.
+          items.push({ role: "별미", menu: danpumMenu.name, meal, special: true, emoji: danpumMenu.emoji || getEmoji(danpumMenu.name) });
+          return;
+        }
         if (meal === "아침") {
           if (mm.simple) items.push({ role: "아침", menu: mm.simple.name, meal });
           else items.push({ role: "아침", placeholder: true, menu: "재료를 더 담으면 아침이 생겨요 🌅", meal });
@@ -1732,14 +1729,30 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
 
   // 일반 한 상 — 끼니별 섹션. 끼니 1개면 라벨 없이(기존과 동일), 여러 개면 끼니 라벨로 구분.
   const items = (day.items || []).map((it, i) => ({ ...it, _i: i }));
-  const renderItem = (it) =>
-    it.placeholder ? (
+  const renderItem = (it) => {
+    if (it.special) {
+      // 별미 단품 (저녁 자리) — ⭐ + 이모지 + 메뉴
+      return (
+        <button
+          key={it._i}
+          onClick={() => onOpen(it.menu)}
+          title={it.menu}
+          className="inline-flex items-center gap-1 text-left text-[13px] font-extrabold leading-snug transition-opacity hover:opacity-70"
+          style={{ color: ROLE_STYLE["별미"].fg }}
+        >
+          <Star size={11} strokeWidth={0} fill={C.gold} className="shrink-0" aria-label="별미" />
+          {it.emoji} {it.menu}
+        </button>
+      );
+    }
+    return it.placeholder ? (
       <span key={it._i} className="text-[12px] font-semibold" style={{ color: FAINT }}>
         {it.role === "메인" ? "🥚 오늘은 가볍게 (재료 더 담으면 메인이 생겨요)" : it.role === "국" ? "🍲 국은 다음에" : it.menu}
       </span>
     ) : (
       dish(it, it._i)
     );
+  };
 
   const mealsPresent = [...new Set(items.map((it) => it.meal || "저녁"))]; // items 순서 = 아침→점심→저녁
   const showMealLabels = mealsPresent.length > 1;
@@ -1747,18 +1760,27 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
   return (
     <div className={`day-row ${ROW}`} style={ROW_STYLE}>
       {label()}
-      <div className="flex flex-1 flex-col justify-center gap-2 px-3.5 py-3">
+      <div className="flex flex-1 flex-col justify-center gap-1.5 px-3.5 py-3">
         {mealsPresent.map((meal) => {
           const mealItems = items.filter((it) => (it.meal || "저녁") === meal);
-          const top = mealItems.filter((it) => it.role === "밥" || it.role === "국");
-          const bottom = mealItems.filter((it) => it.role === "메인" || it.role === "반찬" || it.role === "아침");
+          if (!showMealLabels) {
+            // 단독 끼니(주로 저녁) — 기존 2줄(밥·국 / 메인·반찬) 그대로
+            const top = mealItems.filter((it) => it.role === "밥" || it.role === "국");
+            const bottom = mealItems.filter((it) => it.role !== "밥" && it.role !== "국");
+            return (
+              <div key={meal} className="flex flex-col gap-1.5">
+                {top.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{top.map(renderItem)}</div>}
+                {bottom.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{bottom.map(renderItem)}</div>}
+              </div>
+            );
+          }
+          // 여러 끼니 — 가로 줄: 왼쪽 끼니 라벨 + 오른쪽으로 메뉴 가로 나열
           return (
-            <div key={meal} className="flex flex-col gap-1">
-              {showMealLabels && (
-                <span className="text-[9.5px] font-extrabold tracking-wide" style={{ color: C.gold }}>{MEAL_TAG[meal] || meal}</span>
-              )}
-              {top.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{top.map(renderItem)}</div>}
-              {bottom.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{bottom.map(renderItem)}</div>}
+            <div key={meal} className="flex items-baseline gap-2">
+              <span className="shrink-0 text-[10px] font-extrabold leading-tight" style={{ color: C.gold, minWidth: 42 }}>
+                {MEAL_TAG[meal] || meal}
+              </span>
+              <div className="flex flex-1 flex-wrap items-center gap-x-3 gap-y-0.5">{mealItems.map(renderItem)}</div>
             </div>
           );
         })}

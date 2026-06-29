@@ -3,6 +3,7 @@ import { ChefHat, ShoppingCart, Check, CalendarDays, Sparkles, X, Timer, Hand, R
 import * as htmlToImage from "html-to-image";
 import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealData.js";
 import { generateWeekPlan } from "./generateWeekPlan.js";
+import { parseReceiptText } from "./receiptParser.js";
 
 /* ------------------------------------------------------------------ *
  *  오늘 뭐 먹지? (현실 집밥 편)
@@ -232,6 +233,7 @@ export default function RealHomeMeal() {
   const [activeMenu, setActiveMenu] = useState(null); // 레시피 모달
   const [tab, setTab] = useState("home"); // home | ingredients | plan | menu
   const [sheetOpen, setSheetOpen] = useState(false); // 재료 바꾸기 시트
+  const [receiptOpen, setReceiptOpen] = useState(false); // 📝 영수증/주문내역 담기 시트
   const [customIngredients, setCustomIngredients] = useState([]); // 직접 추가 [{name, cat}]
   const [findQuery, setFindQuery] = useState(""); // 🔎 메뉴찾기 탭 재료 검색어
   const [generating, setGenerating] = useState(false); // 식단 짜는 중 (로딩 연출)
@@ -349,6 +351,15 @@ export default function RealHomeMeal() {
 
   const toggleIngredient = (name) =>
     setSelected((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+
+  // 📝 영수증/주문내역으로 인식한 재료를 한 번에 selected에 추가 (중복 제외)
+  const addIngredientsBulk = (names) => {
+    setSelected((prev) => {
+      const set = new Set(prev);
+      names.forEach((n) => n && set.add(n));
+      return [...set];
+    });
+  };
 
   // 직접 추가 재료 (selected·장보기엔 반영, 메뉴 데이터 없을 수 있으니 식단표는 데이터 있는 재료 위주)
   const addCustomIngredient = (cat, rawName) => {
@@ -504,6 +515,36 @@ export default function RealHomeMeal() {
     return need;
   }, [weekPlan, selected]);
 
+  // 🛒 재료 하나만 더 사면 — 담은 재료 + PANTRY로 "딱 하나"만 부족한 메뉴들 (부족재료별로 묶음)
+  //  부족재료가 재료설정에 담을 수 있는 것(INGREDIENT_CATEGORIES)일 때만. 기존 req/PANTRY 규칙 재사용.
+  const oneMoreGroups = useMemo(() => {
+    const fridge = new Set(selected);
+    if (!fridge.size) return [];
+    const have = (i) => fridge.has(i) || PANTRY.has(i);
+    const byMissing = new Map(); // 부족재료 → [메뉴이름]
+    for (const m of MENUS) {
+      if (m.needShopping) continue; // 장보기 메뉴 제외
+      const missing = (m.req || []).filter((i) => !have(i));
+      if (missing.length !== 1) continue; // 딱 1개만 부족
+      const miss = missing[0];
+      if (!FRIDGE_INGREDIENTS.has(miss)) continue; // 담을 수 있는 재료만(특수재료 제외)
+      if (!byMissing.has(miss)) byMissing.set(miss, []);
+      byMissing.get(miss).push(m.name);
+    }
+    // 흔한 부족재료(메뉴 많은 것) 위주, 그룹당 최대 4개·전체 최대 8개
+    const groups = [...byMissing.entries()].map(([ing, menus]) => ({ ing, menus })).sort((a, b) => b.menus.length - a.menus.length);
+    const out = [];
+    let total = 0;
+    for (const g of groups) {
+      const room = 8 - total;
+      if (room <= 0) break;
+      const menus = g.menus.slice(0, Math.min(4, room));
+      out.push({ ing: g.ing, menus });
+      total += menus.length;
+    }
+    return out;
+  }, [selected]);
+
 
   return (
     <div
@@ -597,6 +638,13 @@ export default function RealHomeMeal() {
                   style={{ background: C.goldSoft, color: C.gold, border: `1px solid ${C.gold}55` }}
                 >
                   🧺 재료 바꾸기 · 담기
+                </button>
+                <button
+                  onClick={() => setReceiptOpen(true)}
+                  className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-2xl py-3 text-[14px] font-bold"
+                  style={{ background: "#fff", color: C.ink, border: `1px solid ${C.line}` }}
+                >
+                  📝 영수증/주문내역으로 한 번에 담기
                 </button>
               </Card>
 
@@ -741,6 +789,9 @@ export default function RealHomeMeal() {
               {/* 이번 주 장보기 리스트 */}
               <ShoppingListSection items={shoppingList} />
 
+              {/* 재료 하나만 더 사면 — 딱 하나 부족한 메뉴 (담은 재료/메뉴 없으면 자동 숨김) */}
+              <OneMoreSection groups={oneMoreGroups} onOpen={setActiveMenu} />
+
               <p className="pb-1 text-center text-[12px]" style={{ color: C.sub }}>엄마도 매일 잘 해내고 있어요 🍀</p>
             </div>
           ) : (
@@ -861,6 +912,15 @@ export default function RealHomeMeal() {
         custom={customIngredients}
         onAddCustom={addCustomIngredient}
         onDeleteCustom={deleteCustomIngredient}
+        reduced={reducedMotion}
+      />
+
+      {/* 📝 영수증/주문내역으로 재료 담기 시트 */}
+      <ReceiptSheet
+        open={receiptOpen}
+        onClose={() => setReceiptOpen(false)}
+        selected={selected}
+        onAdd={addIngredientsBulk}
         reduced={reducedMotion}
       />
 
@@ -1061,6 +1121,56 @@ function ShoppingListSection({ items }) {
           쿠팡 파트너스 활동의 일환으로 수수료를 받을 수 있습니다
         </p>
       )}
+    </section>
+  );
+}
+
+// 🛒 재료 하나만 더 사면 — 딱 하나 부족한 메뉴를 부족재료별로 묶어 보여줌 (장보기 유도)
+//  부족재료 칩 = 쿠팡 검색 링크(buildCoupangLink). 메뉴 칩 = 레시피 모달.
+function OneMoreSection({ groups, onOpen }) {
+  if (!groups.length) return null;
+  return (
+    <section className="rounded-3xl p-5" style={{ background: C.card, border: `1px solid ${C.gold}40` }}>
+      <div className="flex items-center gap-1.5">
+        <span className="h-3.5 w-1 rounded-full" style={{ background: C.gold }} />
+        <h2 className="text-[15px] font-bold tracking-tight" style={{ color: C.ink }}>
+          🛒 재료 하나만 더 사면, 이런 메뉴도 돼요!
+        </h2>
+      </div>
+      <p className="mb-1 mt-1 text-[11.5px]" style={{ color: C.sub }}>
+        딱 하나만 더 있으면 만들 수 있어요 · 재료를 톡 누르면 쿠팡 검색
+      </p>
+      <div className="mt-2 space-y-3">
+        {groups.map((g) => (
+          <div key={g.ing}>
+            {/* 부족재료 (쿠팡 링크 자리 — 나중에 파트너스 링크 연결 가능) */}
+            <button
+              onClick={() => window.open(buildCoupangLink(g.ing), "_blank", "noopener,noreferrer")}
+              className="inline-flex items-center gap-1 rounded-full py-1 pl-2.5 pr-2 text-[12px] font-bold transition-all"
+              style={{ background: C.goldSoft, color: C.gold, border: `1px solid ${C.gold}55` }}
+            >
+              🛒 {g.ing}만 더 있으면!
+              <ShoppingCart size={11} strokeWidth={2.4} />
+            </button>
+            {/* 그 재료로 되는 메뉴들 */}
+            <div className="mt-1.5 flex flex-wrap gap-1.5">
+              {g.menus.map((menu) => (
+                <button
+                  key={menu}
+                  onClick={() => onOpen(menu)}
+                  className="inline-flex items-center gap-1 rounded-full bg-white py-1.5 px-3 text-[12.5px] font-medium transition-all"
+                  style={{ color: C.ink, border: `1px solid ${C.line}` }}
+                >
+                  {getEmoji(menu)} {menu}
+                </button>
+              ))}
+            </div>
+          </div>
+        ))}
+      </div>
+      <p className="mt-3 text-[10.5px] leading-snug" style={{ color: C.sub }}>
+        쿠팡 파트너스 활동의 일환으로 수수료를 받을 수 있습니다
+      </p>
     </section>
   );
 }
@@ -1651,6 +1761,172 @@ function AddSheet({ open, onClose, selected, onToggle, custom = [], onAddCustom,
             이 재료로 식단 짜기 ({selected.length}개 담음)
           </button>
         </div>
+      </div>
+    </div>
+  );
+}
+
+// 📝 영수증/주문내역 → 재료 담기 시트
+//  1) 텍스트 붙여넣기(나중에 OCR로 텍스트를 채우면 그대로 재사용 가능) → parseReceiptText
+//  2) 인식 결과 체크박스 확인(오인식 해제 / 빠진 것 직접 추가) → selected에 담기
+function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
+  const [step, setStep] = useState("input"); // "input" | "confirm"
+  const [text, setText] = useState("");
+  const [matched, setMatched] = useState([]); // 인식된 재료 [name]
+  const [ignored, setIgnored] = useState([]); // 무시한 줄(양념 등)
+  const [checked, setChecked] = useState({}); // { name: bool }
+  const [draft, setDraft] = useState(""); // 직접 추가 입력
+
+  useEffect(() => {
+    if (open) return;
+    // 닫히면 초기화
+    setStep("input"); setText(""); setMatched([]); setIgnored([]); setChecked({}); setDraft("");
+  }, [open]);
+  useEffect(() => {
+    if (!open) return;
+    const onKey = (e) => e.key === "Escape" && onClose();
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [open, onClose]);
+  if (!open) return null;
+
+  const runParse = () => {
+    const { matched: m, ignored: ig } = parseReceiptText(text);
+    setMatched(m);
+    setIgnored(ig);
+    const c = {};
+    m.forEach((i) => { c[i] = true; }); // 전부 기본 체크
+    setChecked(c);
+    setStep("confirm");
+  };
+  const toggle = (name) => setChecked((p) => ({ ...p, [name]: !p[name] }));
+  const addManual = () => {
+    const name = draft.trim();
+    if (!name) return;
+    if (!matched.includes(name)) {
+      setMatched((p) => [...p, name]);
+      setChecked((p) => ({ ...p, [name]: true }));
+    }
+    setDraft("");
+  };
+  const confirmAdd = () => {
+    onAdd(matched.filter((i) => checked[i]));
+    onClose();
+  };
+
+  const checkedCount = matched.filter((i) => checked[i]).length;
+
+  return (
+    <div className="fixed inset-0 z-50 flex items-end justify-center">
+      <div onClick={onClose} className={`absolute inset-0 ${reduced ? "" : "fade-in"}`} style={{ background: "rgba(35,28,22,0.45)" }} />
+      <div
+        className={`relative flex w-full max-w-[480px] flex-col ${reduced ? "" : "sheet-up"}`}
+        style={{ maxHeight: "85vh", background: C.canvas, borderTopLeftRadius: 26, borderTopRightRadius: 26, boxShadow: "0 -18px 50px -20px rgba(58,42,32,0.5)", fontFamily: "'Paperlogy','Inter','Pretendard',system-ui,sans-serif" }}
+      >
+        <div className="flex justify-center pt-3">
+          <span className="h-1.5 w-10 rounded-full" style={{ background: C.line }} />
+        </div>
+        <div className="flex items-center justify-between px-5 pb-1 pt-2">
+          <h3 className="text-[15px] font-bold tracking-tight" style={{ color: C.ink }}>
+            📝 영수증/주문내역으로 담기
+          </h3>
+          <button onClick={onClose} aria-label="닫기" className="rounded-full p-1" style={{ color: C.sub }}>
+            <X size={18} strokeWidth={2.4} />
+          </button>
+        </div>
+
+        {step === "input" ? (
+          <div className="flex flex-col gap-3 overflow-y-auto px-5 pb-5 pt-2">
+            {/* 📷 (나중에) 사진 OCR 자리: 여기서 텍스트를 채워 setText() 하면 그대로 이어짐 */}
+            <p className="text-[12.5px] leading-relaxed" style={{ color: C.sub }}>
+              마트 영수증 내용이나 쿠팡 주문내역을 붙여넣으세요.<br />
+              상품명에서 재료를 자동으로 찾아드려요 (양념·기타는 빼고요).
+            </p>
+            <textarea
+              value={text}
+              onChange={(e) => setText(e.target.value)}
+              placeholder={"예)\n돼지고기 앞다리 600g\n애호박 1개\n두부 2모\n계란 한판\n대파 한단"}
+              rows={8}
+              className="w-full resize-none rounded-2xl px-3.5 py-3 text-[13.5px] leading-relaxed outline-none"
+              style={{ background: "#fff", border: `1px solid ${C.line}`, color: C.ink }}
+            />
+            <button
+              onClick={runParse}
+              disabled={!text.trim()}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[15px] font-bold transition-all"
+              style={{ background: text.trim() ? C.gold : C.line, color: "#fff", boxShadow: text.trim() ? "0 14px 28px -16px rgba(217,96,63,0.9)" : "none" }}
+            >
+              🔎 재료 찾기
+            </button>
+          </div>
+        ) : (
+          <div className="flex flex-col overflow-hidden">
+            <div className="flex-1 overflow-y-auto px-5 pb-2 pt-1">
+              <p className="mb-2 text-[12.5px]" style={{ color: C.sub }}>
+                인식된 재료예요. 잘못된 건 체크를 풀고, 빠진 건 아래에서 추가하세요.
+              </p>
+              {matched.length > 0 ? (
+                <div className="flex flex-col gap-1.5">
+                  {matched.map((name) => (
+                    <button
+                      key={name}
+                      onClick={() => toggle(name)}
+                      className="flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all"
+                      style={{ background: checked[name] ? C.goldSoft : "#fff", border: `1px solid ${checked[name] ? C.gold + "66" : C.line}` }}
+                    >
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ background: checked[name] ? C.gold : "#fff", border: `1.5px solid ${checked[name] ? C.gold : C.line}` }}>
+                        {checked[name] && <Check size={13} strokeWidth={3.2} color="#fff" />}
+                      </span>
+                      <span className="text-[14px] font-semibold" style={{ color: C.ink }}>{name}</span>
+                      {selected.includes(name) && (
+                        <span className="ml-auto text-[10.5px] font-bold" style={{ color: C.sage }}>이미 담음</span>
+                      )}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <p className="rounded-2xl px-4 py-6 text-center text-[13px]" style={{ background: "#fff", border: `1px dashed ${C.line}`, color: C.sub }}>
+                  인식된 재료가 없어요. 아래에서 직접 추가하거나, 텍스트를 다시 확인해 주세요.
+                </p>
+              )}
+
+              {/* 직접 추가 */}
+              <div className="mt-3 flex items-center gap-2">
+                <input
+                  value={draft}
+                  onChange={(e) => setDraft(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && addManual()}
+                  placeholder="빠진 재료 직접 추가 (예: 양파)"
+                  className="min-w-0 flex-1 rounded-2xl px-3.5 py-2.5 text-[13.5px] outline-none"
+                  style={{ background: "#fff", border: `1px solid ${C.line}`, color: C.ink }}
+                />
+                <button onClick={addManual} className="shrink-0 rounded-2xl px-4 py-2.5 text-[13px] font-bold" style={{ background: C.goldSoft, color: C.gold, border: `1px solid ${C.gold}55` }}>
+                  추가
+                </button>
+              </div>
+
+              {ignored.length > 0 && (
+                <p className="mt-3 text-[11px] leading-snug" style={{ color: C.sub }}>
+                  양념·기타 {ignored.length}줄은 제외했어요.
+                </p>
+              )}
+            </div>
+
+            <div className="flex gap-2 border-t px-5 py-3" style={{ borderColor: C.line }}>
+              <button onClick={() => setStep("input")} className="shrink-0 rounded-2xl px-4 py-3.5 text-[14px] font-bold" style={{ background: "#fff", color: C.ink, border: `1px solid ${C.line}` }}>
+                ‹ 다시
+              </button>
+              <button
+                onClick={confirmAdd}
+                disabled={checkedCount === 0}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl py-3.5 text-[15px] font-bold transition-all"
+                style={{ background: checkedCount ? C.gold : C.line, color: "#fff", boxShadow: checkedCount ? "0 14px 28px -16px rgba(217,96,63,0.9)" : "none" }}
+              >
+                🧺 이 재료들 냉장고에 담기 {checkedCount > 0 && `(${checkedCount})`}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

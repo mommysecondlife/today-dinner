@@ -87,22 +87,41 @@ export const RECEIPT_IGNORE = [
 // ============================================
 // 매칭 함수: 영수증 텍스트(여러 줄) → 앱 재료 배열
 // ============================================
-export function parseReceiptText(rawText) {
-  const lines = rawText.split(/[\n,]/).map(l => l.trim()).filter(Boolean);
-  const found = new Set();
-  const ignoredHits = [];
+// 숫자·공백·특수문자를 제거하고 한글/영문만 남김 (OCR이 "황태채1009", "콩 나 물"처럼 읽어도 매칭되게)
+function squeeze(s) {
+  return (s || "").replace(/[^가-힣A-Za-z]/g, "");
+}
 
+// 한 줄에 재료 별칭이 들어있는지 (원본 + 숫자/특수문자 제거 버전 둘 다 검사)
+function lineHasIngredient(line) {
+  const sq = squeeze(line);
+  return Object.values(RECEIPT_INGREDIENT_MAP).some(aliases =>
+    aliases.some(a => line.includes(a) || sq.includes(squeeze(a)))
+  );
+}
+
+export function parseReceiptText(rawText) {
+  const lines = (rawText || "").split(/[\n,]/).map(l => l.trim()).filter(Boolean);
+  const ignoredHits = [];
+  const keptLines = [];
+
+  // 1) 무시 키워드 제외는 줄 단위로 유지하되, "재료가 같이 있는 줄"은 살림
+  //    (예: "콩나물 행사 980" → 행사 있어도 콩나물이 있으니 안 버림 / "간장 1.8L" → 양념만이라 제외)
   for (const line of lines) {
-    // 무시 키워드가 있으면 스킵
-    if (RECEIPT_IGNORE.some(ig => line.includes(ig))) {
-      ignoredHits.push(line);
-      continue;
-    }
-    // 재료 매칭
-    for (const [ingredient, aliases] of Object.entries(RECEIPT_INGREDIENT_MAP)) {
-      if (aliases.some(a => line.includes(a))) {
-        found.add(ingredient);
-      }
+    const hasIgnore = RECEIPT_IGNORE.some(ig => line.includes(ig));
+    if (hasIgnore && !lineHasIngredient(line)) { ignoredHits.push(line); continue; }
+    keptLines.push(line);
+  }
+
+  // 2) 살린 줄들을 전체 텍스트로 + 숫자/특수문자 제거 버전으로 (줄바꿈은 남겨 줄 사이 오매칭 방지)
+  const whole = keptLines.join("\n");
+  const wholeSqueezed = keptLines.map(squeeze).join("\n");
+
+  // 3) 별칭이 (원본 전체 텍스트) 또는 (숫자·특수문자 제거 버전) 어디든 있으면 매칭 — 줄 구조 무관
+  const found = new Set();
+  for (const [ingredient, aliases] of Object.entries(RECEIPT_INGREDIENT_MAP)) {
+    if (aliases.some(a => whole.includes(a) || wholeSqueezed.includes(squeeze(a)))) {
+      found.add(ingredient);
     }
   }
 

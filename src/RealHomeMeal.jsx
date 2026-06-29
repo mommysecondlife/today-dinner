@@ -5,11 +5,42 @@ import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealDat
 import { generateWeekPlan } from "./generateWeekPlan.js";
 import { parseReceiptText } from "./receiptParser.js";
 import Tesseract, { PSM } from "tesseract.js";
+// 페이퍼로지 폰트 파일 — 캡처(html-to-image) 시 base64로 인라인 임베드해 한글 깨짐 방지
+import paperlogyRegular from "./fonts/Paperlogy-4Regular.ttf";
+import paperlogyMedium from "./fonts/Paperlogy-5Medium.ttf";
+import paperlogyBold from "./fonts/Paperlogy-7Bold.ttf";
 
 /* ------------------------------------------------------------------ *
  *  오늘 뭐 먹지? (현실 집밥 편)
  *  화이트 & 마블 톤 · 워킹맘 가성비 식단 루틴
  * ------------------------------------------------------------------ */
+
+// 폰트 파일 → base64 (캡처용 @font-face 인라인 임베드)
+async function fontFileToBase64(url) {
+  const blob = await (await fetch(url)).blob();
+  const dataUrl = await new Promise((resolve, reject) => {
+    const fr = new FileReader();
+    fr.onload = () => resolve(fr.result);
+    fr.onerror = reject;
+    fr.readAsDataURL(blob);
+  });
+  return String(dataUrl).split(",")[1]; // base64 본문만
+}
+
+// 페이퍼로지 @font-face CSS(base64 임베드) — 한 번 만들어 캐시. html-to-image fontEmbedCSS로 넘겨 100% 포함.
+let _paperlogyEmbedCSS = null;
+async function getPaperlogyEmbedCSS() {
+  if (_paperlogyEmbedCSS) return _paperlogyEmbedCSS;
+  const [r, m, b] = await Promise.all([
+    fontFileToBase64(paperlogyRegular),
+    fontFileToBase64(paperlogyMedium),
+    fontFileToBase64(paperlogyBold),
+  ]);
+  const face = (weight, data) =>
+    `@font-face{font-family:'Paperlogy';font-style:normal;font-weight:${weight};font-display:swap;src:url(data:font/ttf;base64,${data}) format('truetype');}`;
+  _paperlogyEmbedCSS = [face(400, r), face(500, m), face(700, b)].join("\n");
+  return _paperlogyEmbedCSS;
+}
 
 // 팔레트 (마블 화이트 + 웜 골드 + 세이지)
 // 따뜻한 집밥 톤 — 버터 크림 바탕 + 고추장/파프리카 레드 + 쪽파 그린
@@ -246,25 +277,33 @@ export default function RealHomeMeal() {
 
   // 📷 식단표 캡처 — 저장/공유 공용 (보여주기 전용, 식단 데이터/생성 로직은 안 건드림)
   //  캡처 영역·워터마크·크림 배경 채우기·oklch 보정은 기존 그대로
-  const CAPTURE_FONT = "'Pretendard Variable','Pretendard','Noto Sans KR',system-ui,sans-serif";
+  // 앱 화면과 동일하게 페이퍼로지. (임베드 실패 대비 Pretendard·Noto는 폴백으로만 체인에 둠)
+  const CAPTURE_FONT = "'Paperlogy','Pretendard Variable','Noto Sans KR',system-ui,sans-serif";
   const capturePlanBlob = async () => {
     const node = captureRef.current;
     if (!node) throw new Error("캡처 영역 없음");
-    // 폰트가 다 준비된 뒤 캡처 (한글 깨짐 방지) — Variable 1개 파일이 모든 굵기 커버
+    // 폰트가 다 준비된 뒤 캡처 (한글 깨짐 방지) — 사용하는 굵기별로 로드 완료까지 대기
     try {
       if (document.fonts && document.fonts.load) {
         await Promise.all([
-          document.fonts.load("400 16px 'Pretendard Variable'"),
-          document.fonts.load("700 16px 'Pretendard Variable'"),
+          document.fonts.load("400 16px Paperlogy"),
+          document.fonts.load("500 16px Paperlogy"),
+          document.fonts.load("700 16px Paperlogy"),
         ]);
       }
       await document.fonts.ready;
     } catch { /* 폰트 API 미지원 환경은 무시 */ }
-    // html-to-image — 웹폰트를 임베드해 네이티브 렌더 → 한글이 굵기 상관없이 안 깨짐
+    // 페이퍼로지를 base64로 인라인 임베드 → 캡처에 폰트 100% 포함 (잡곡밥→자고바 깨짐 방지)
+    let fontEmbedCSS;
+    try {
+      fontEmbedCSS = await getPaperlogyEmbedCSS();
+    } catch { /* 임베드 실패 시 html-to-image 자동 임베드 + 폴백 체인 사용 */ }
+    // html-to-image — 폰트를 임베드해 네이티브 렌더 → 한글이 굵기 상관없이 안 깨짐
     const dataUrl = await htmlToImage.toPng(node, {
       pixelRatio: 2, // 고해상도
       backgroundColor: "#FCF7F0", // 앱 크림 배경
       style: { fontFamily: CAPTURE_FONT }, // 캡처 영역 폰트 명시
+      ...(fontEmbedCSS ? { fontEmbedCSS } : {}),
     });
     const blob = await (await fetch(dataUrl)).blob();
     if (!blob) throw new Error("이미지 생성 실패");

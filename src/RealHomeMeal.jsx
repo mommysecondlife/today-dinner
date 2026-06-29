@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
-import { ChefHat, ShoppingCart, Check, CalendarDays, Sparkles, X, Timer, Hand, RefreshCw, ChevronDown, Search, Share2 } from "lucide-react";
+import { ChefHat, ShoppingCart, Check, CalendarDays, Sparkles, X, Timer, Hand, RefreshCw, ChevronDown, Search, Share2, Star } from "lucide-react";
 import * as htmlToImage from "html-to-image";
 import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealData.js";
 import { generateWeekPlan } from "./generateWeekPlan.js";
@@ -1501,13 +1501,13 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
       <div className={ROW} style={ROW_STYLE}>
         {label()}
         <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 px-3.5 py-3">
-          <span className="text-[9px] font-bold" style={{ color: bv.fg }}>별미</span>
           <button
             onClick={() => onOpen(sp.menu)}
             title={sp.menu}
-            className="text-left text-[14px] font-extrabold leading-snug transition-opacity hover:opacity-70"
+            className="flex items-center gap-1 text-left text-[14px] font-extrabold leading-snug transition-opacity hover:opacity-70"
             style={{ color: bv.fg }}
           >
+            <Star size={12} strokeWidth={0} fill={C.gold} className="shrink-0" aria-label="별미" />
             {sp.emoji} {sp.menu}
           </button>
         </div>

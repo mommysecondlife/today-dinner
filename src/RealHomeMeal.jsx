@@ -569,6 +569,17 @@ export default function RealHomeMeal() {
 
   const cookingDays = weekPlan.filter((d) => !d.rest).length;
 
+  // 이번 주(월~일) 실제 날짜 — 앱 여는 시점(new Date()) 기준, 월요일 시작. { 월: 30, 화: 1, ... }
+  const weekDates = useMemo(() => {
+    const today = new Date();
+    const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7));
+    const map = {};
+    ["월", "화", "수", "목", "금", "토", "일"].forEach((d, i) => {
+      map[d] = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i).getDate();
+    });
+    return map;
+  }, []);
+
   // 이번 주 장보기 리스트 — 한 주 식단의 각 메뉴에 필요한 재료 중 담은 재료·PANTRY에 없는 것 전부 (중복 제거)
   const shoppingList = useMemo(() => {
     const sel = new Set(selected);
@@ -799,7 +810,7 @@ export default function RealHomeMeal() {
                   {/* 위클리 플래너 — 요일별 가로 줄(월~일 세로로 쌓임) + 맨 아래 MEMO */}
                   <div className="mt-3 space-y-2">
                     {weekPlan.map((d) => (
-                      <DayCell key={d.day} day={d} onOpen={setActiveMenu} onSwap={swapCell} swapPools={swapPools} />
+                      <DayCell key={d.day} day={d} dateNum={weekDates[d.day]} onOpen={setActiveMenu} onSwap={swapCell} swapPools={swapPools} />
                     ))}
                     <MemoCell />
                   </div>
@@ -1418,14 +1429,17 @@ function MemoCell() {
 }
 
 // 위클리 플래너 — 요일별 가로 줄. 왼쪽 요일 라벨 + 윗줄(밥·국) / 아랫줄(메인·반찬). 글자 잘림 없음.
-function DayCell({ day, onOpen, onSwap, swapPools }) {
+function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
   // 요일 라벨 색 — 달력 관습: 평일 검정(진한 회색) / 토 파랑 / 일 빨강 (외식 day도 동일 적용)
   const DOW_COLOR = day.day === "토" ? "#2563EB" : day.day === "일" ? "#DC2626" : "#333333";
-  // 요일 라벨 (왼쪽 고정 블록)
+  // 요일 라벨 (왼쪽 고정 블록) — 한글 요일 + 영문 요일 + 이번 주 실제 날짜(일 숫자)
   const label = () => (
     <div className="flex w-12 shrink-0 flex-col items-center justify-center self-stretch py-1.5" style={{ borderRight: `1px solid ${C.gold}22` }}>
       <span className="text-[15px] font-extrabold leading-none" style={{ color: DOW_COLOR }}>{day.day}</span>
       <span className="mt-0.5 text-[8px] font-bold tracking-[0.12em]" style={{ color: DOW_COLOR, opacity: 0.72 }}>{ENG_DAY[day.day] || ""}</span>
+      {dateNum != null && (
+        <span className="mt-0.5 text-[10px] font-bold leading-none" style={{ color: DOW_COLOR, opacity: 0.55 }}>{dateNum}</span>
+      )}
     </div>
   );
 

@@ -649,19 +649,25 @@ export default function RealHomeMeal() {
       if (!byMissing.has(miss)) byMissing.set(miss, []);
       byMissing.get(miss).push(m.name);
     }
-    // 흔한 부족재료(메뉴 많은 것) 위주, 그룹당 최대 4개·전체 최대 8개
-    const groups = [...byMissing.entries()].map(([ing, menus]) => ({ ing, menus })).sort((a, b) => b.menus.length - a.menus.length);
-    const out = [];
-    let total = 0;
-    for (const g of groups) {
-      const room = 8 - total;
-      if (room <= 0) break;
-      const menus = g.menus.slice(0, Math.min(4, room));
-      out.push({ ing: g.ing, menus });
-      total += menus.length;
-    }
-    return out;
-  }, [selected]);
+    // 다양하게: 메뉴 여러 개(3개 이상) 푸는 재료를 우선, 그 중 랜덤 5~6개 재료를 골라 보여줌.
+    //  (모자라면 메뉴 적은 재료로 보충) · "다시 짜기"(regen)/새로고침마다 조합이 바뀜.
+    const shuffle = (arr) => {
+      const a = arr.slice();
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    };
+    const all = [...byMissing.entries()].map(([ing, menus]) => ({ ing, menus }));
+    const rich = all.filter((g) => g.menus.length >= 3); // 효율적인 장보기 = 여러 메뉴 푸는 재료 우선
+    const rest = all.filter((g) => g.menus.length < 3).sort((a, b) => b.menus.length - a.menus.length);
+    const want = 5 + Math.floor(Math.random() * 2); // 5~6개 재료 그룹
+    const picked = shuffle(rich).slice(0, want);
+    if (picked.length < want) picked.push(...rest.slice(0, want - picked.length));
+    // 각 그룹 메뉴는 3~4개까지만(랜덤으로 섞어 매번 다른 메뉴가 보이게)
+    return picked.map((g) => ({ ing: g.ing, menus: shuffle(g.menus).slice(0, 3 + Math.floor(Math.random() * 2)) }));
+  }, [selected, regen]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   return (

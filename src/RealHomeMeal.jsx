@@ -1561,7 +1561,7 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
   const renderItem = (it) =>
     it.placeholder ? (
       <span key={it._i} className="text-[12px] font-semibold" style={{ color: FAINT }}>
-        {it.role === "메인" ? "메인 없음" : it.role === "국" ? "국 없음" : it.menu}
+        {it.role === "메인" ? "🥚 오늘은 가볍게 (재료 더 담으면 메인이 생겨요)" : it.role === "국" ? "🍲 국은 다음에" : it.menu}
       </span>
     ) : (
       dish(it, it._i)

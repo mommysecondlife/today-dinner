@@ -796,12 +796,12 @@ export default function RealHomeMeal() {
                       집밥 {cookingDays}일 · 외식 {restDays.length}일
                     </span>
                   </div>
-                  {/* 위클리 플래너 그리드 — 데스크탑 4열×2행, 모바일 2열. 첫 칸=MEMO + 월~일 7칸 */}
-                  <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
-                    <MemoCell />
+                  {/* 위클리 플래너 — 요일별 가로 줄(월~일 세로로 쌓임) + 맨 아래 MEMO */}
+                  <div className="mt-3 space-y-2">
                     {weekPlan.map((d) => (
                       <DayCell key={d.day} day={d} onOpen={setActiveMenu} onSwap={swapCell} swapPools={swapPools} />
                     ))}
+                    <MemoCell />
                   </div>
                   {/* 워터마크 */}
                   <div className="mt-3.5 flex items-center justify-center gap-1.5 text-[10.5px] font-semibold">
@@ -1393,10 +1393,8 @@ function SeasonalSection({ currentMonth, selected, onToggle, onOpenMenu }) {
   );
 }
 
-// 위클리 플래너 — 손그림 달력 느낌의 칸
+// 위클리 플래너 — 요일별 가로 줄
 const ENG_DAY = { 월: "MON", 화: "TUE", 수: "WED", 목: "THU", 금: "FRI", 토: "SAT", 일: "SUN" };
-const CELL = "flex flex-col overflow-hidden rounded-xl"; // 칸 공통
-const CELL_STYLE = { background: "#FFFFFF", border: `1px solid ${C.gold}33`, minHeight: 108 };
 const FAINT = "#B6A48C"; // 메인/국 없음
 const MAIN_TXT = "#3A2A20"; // 메인 (조금 더 진하게)
 const SUB_TXT = "#5A4636"; // 밥·국·반찬
@@ -1405,39 +1403,42 @@ const SOFT_GREEN = "var(--color-rest-day)";
 const SOFT_GREEN_BD = "var(--color-rest-day-border)";
 const REST_INK = "var(--color-rest-day-ink)";
 
-// 📝 MEMO(장보기) 칸 — 다음 단계에서 내용 채움. 지금은 자리만.
+// 가로 줄 레이아웃 공통 — 흰 카드 한 줄
+const ROW = "flex items-stretch overflow-hidden rounded-xl";
+const ROW_STYLE = { background: "#FFFFFF", border: `1px solid ${C.gold}33` };
+
+// 📝 MEMO(장보기) 줄 — 가로 줄 레이아웃 맨 아래 메모 칸 (그대로 유지, 한 줄 형태로)
 function MemoCell() {
   return (
-    <div className={CELL} style={{ background: SOFT_GREEN, border: `1px dashed ${SOFT_GREEN_BD}`, minHeight: 108 }}>
-      <div className="px-2.5 pt-2 pb-1.5" style={{ borderBottom: `1px dashed ${SOFT_GREEN_BD}` }}>
-        <span className="text-[12px] font-extrabold tracking-wide" style={{ color: REST_INK }}>📝 MEMO</span>
-        <span className="ml-1 text-[9px] font-bold" style={{ color: C.sub }}>장보기</span>
-      </div>
-      <div className="flex-1" />
+    <div className="flex items-center gap-2 rounded-xl px-3 py-2.5" style={{ background: SOFT_GREEN, border: `1px dashed ${SOFT_GREEN_BD}` }}>
+      <span className="text-[12px] font-extrabold tracking-wide" style={{ color: REST_INK }}>📝 MEMO</span>
+      <span className="text-[10px] font-bold" style={{ color: C.sub }}>장보기 · 메모</span>
     </div>
   );
 }
 
-// 위클리 플래너 요일 칸 — 요일명(월/MON) + 그날 메뉴를 세로로 (메인만 조금 더 진하게)
+// 위클리 플래너 — 요일별 가로 줄. 왼쪽 요일 라벨 + 윗줄(밥·국) / 아랫줄(메인·반찬). 글자 잘림 없음.
 function DayCell({ day, onOpen, onSwap, swapPools }) {
-  const header = (color) => (
-    <div className="flex items-baseline justify-between px-2.5 pt-2 pb-1.5" style={{ borderBottom: `1px solid ${C.gold}22` }}>
-      <span className="text-[14px] font-extrabold leading-none" style={{ color: color || MAIN_TXT }}>{day.day}</span>
-      <span className="text-[8px] font-bold tracking-[0.15em]" style={{ color: C.sub }}>{ENG_DAY[day.day] || ""}</span>
+  // 요일 라벨 (왼쪽 고정 블록)
+  const label = (color) => (
+    <div className="flex w-12 shrink-0 flex-col items-center justify-center self-stretch py-1.5" style={{ borderRight: `1px solid ${C.gold}22` }}>
+      <span className="text-[15px] font-extrabold leading-none" style={{ color: color || MAIN_TXT }}>{day.day}</span>
+      <span className="mt-0.5 text-[8px] font-bold tracking-[0.12em]" style={{ color: C.sub }}>{ENG_DAY[day.day] || ""}</span>
     </div>
   );
-  // 한 칸(밥/국/메인/반찬): 메뉴명(탭→레시피) + 같은 역할에 다른 후보가 있으면 🔄(탭→교체)
+
+  // 한 메뉴: 이름(탭→레시피) + 같은 역할에 다른 후보 있으면 작은 🔄(탭→교체)
   const dish = (it, idx) => {
     const strong = it.role === "메인";
     const base = strong ? MAIN_TXT : SUB_TXT;
     const canSwap = !!onSwap && (swapPools?.[it.role]?.length || 0) > 1;
     return (
-      <div key={idx} className="flex items-center gap-0.5">
+      <span key={idx} className="inline-flex items-center gap-0.5">
         <button
           onClick={() => onOpen(it.menu)}
           title={it.menu}
-          className="min-w-0 flex-1 truncate text-left leading-snug transition-colors"
-          style={{ color: base, fontSize: strong ? "12px" : "11px", fontWeight: strong ? 800 : 600 }}
+          className="text-left leading-snug transition-colors"
+          style={{ color: base, fontSize: strong ? "13px" : "12.5px", fontWeight: strong ? 800 : 600 }}
           onMouseEnter={(e) => (e.currentTarget.style.color = C.gold)}
           onMouseLeave={(e) => (e.currentTarget.style.color = base)}
         >
@@ -1448,68 +1449,75 @@ function DayCell({ day, onOpen, onSwap, swapPools }) {
             onClick={() => onSwap(day.day, idx, it.role, it.menu)}
             title="다른 메뉴로 바꾸기"
             aria-label={`${it.menu} 다른 메뉴로 바꾸기`}
-            className="shrink-0 rounded leading-none opacity-40 transition-opacity hover:opacity-90"
-            style={{ fontSize: "10px", padding: "1px" }}
+            className="shrink-0 leading-none opacity-35 transition-opacity hover:opacity-90"
+            style={{ fontSize: "10px" }}
           >
             🔄
           </button>
         )}
-      </div>
+      </span>
     );
   };
 
-  // 외식 day — 크림색(일반 흰 칸과 살짝 다른 따뜻한 톤). 초록은 MEMO 전용.
+  // 외식 day — 한 줄로 간결하게
   if (day.rest) {
     return (
-      <div className={CELL} style={{ ...CELL_STYLE, background: "#FCF7EE", border: `1px solid ${C.gold}22` }}>
-        {header(C.sub)}
-        <div className="flex flex-1 items-center justify-center px-2 py-3">
-          <span className="text-[12px] font-bold" style={{ color: C.sub }}>외식 day 🍴</span>
+      <div className={ROW} style={{ ...ROW_STYLE, background: "#FCF7EE", border: `1px solid ${C.gold}22` }}>
+        {label(C.sub)}
+        <div className="flex flex-1 items-center px-3 py-2.5">
+          <span className="text-[12.5px] font-bold" style={{ color: C.sub }}>외식 day 🍴</span>
         </div>
       </div>
     );
   }
 
-  // 별미 day
+  // 별미 day — 한 줄로
   if (day.special) {
     const sp = day.sp;
     const bv = ROLE_STYLE["별미"];
     return (
-      <div className={CELL} style={CELL_STYLE}>
-        {header()}
-        <div className="flex-1 px-2.5 py-2">
-          <div className="mb-0.5 text-[8.5px] font-bold" style={{ color: bv.fg }}>{sp.tag || "색다른"}</div>
+      <div className={ROW} style={ROW_STYLE}>
+        {label()}
+        <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2.5">
+          <span className="text-[9px] font-bold" style={{ color: bv.fg }}>{sp.tag || "색다른"}</span>
           <button
             onClick={() => onOpen(sp.menu)}
             title={sp.menu}
-            className="block w-full text-left text-[12.5px] font-extrabold leading-snug transition-opacity hover:opacity-70"
+            className="text-left text-[13px] font-extrabold leading-snug transition-opacity hover:opacity-70"
             style={{ color: bv.fg }}
           >
             {sp.emoji} {sp.menu}
           </button>
           {sp.shop && sp.shop.length > 0 && (
-            <div className="mt-1 text-[8.5px] leading-tight" style={{ color: C.sub }}>🛒 {sp.shop.join(", ")}</div>
+            <span className="text-[10px] leading-tight" style={{ color: C.sub }}>🛒 {sp.shop.join(", ")}</span>
           )}
         </div>
       </div>
     );
   }
 
-  // 일반 한 상 — 밥·국·메인·반찬 세로로 (items 순서 = 밥→국→메인→반찬)
-  const items = day.items || [];
+  // 일반 한 상 — 윗줄: 밥+국 / 아랫줄: 메인+반찬 (items 순서 = 밥→국→메인→반찬)
+  const items = (day.items || []).map((it, i) => ({ ...it, _i: i }));
+  const topItems = items.filter((it) => it.role === "밥" || it.role === "국");
+  const bottomItems = items.filter((it) => it.role === "메인" || it.role === "반찬");
+  const renderItem = (it) =>
+    it.placeholder ? (
+      <span key={it._i} className="text-[12px] font-semibold" style={{ color: FAINT }}>
+        {it.role === "메인" ? "메인 없음" : it.role === "국" ? "국 없음" : it.menu}
+      </span>
+    ) : (
+      dish(it, it._i)
+    );
 
   return (
-    <div className={CELL} style={CELL_STYLE}>
-      {header()}
-      <div className="flex-1 space-y-[3px] px-2.5 py-2">
-        {items.map((it, i) =>
-          it.placeholder ? (
-            <span key={i} className="block text-[11px] font-semibold" style={{ color: FAINT }}>
-              {it.role === "메인" ? "메인 없음" : it.role === "국" ? "국 없음" : it.menu}
-            </span>
-          ) : (
-            dish(it, i)
-          )
+    <div className={ROW} style={ROW_STYLE}>
+      {label()}
+      <div className="flex flex-1 flex-col justify-center gap-1 px-3 py-2.5">
+        {/* 윗줄: 밥 + 국 */}
+        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">{topItems.map(renderItem)}</div>
+        {/* 아랫줄: 메인 + 반찬 */}
+        {bottomItems.length > 0 && (
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">{bottomItems.map(renderItem)}</div>
         )}
       </div>
     </div>

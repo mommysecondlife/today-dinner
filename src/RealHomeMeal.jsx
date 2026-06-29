@@ -1,4 +1,4 @@
-import React, { useState, useMemo, useEffect, useRef } from "react";
+import React, { useState, useMemo, useEffect, useRef, useCallback } from "react";
 import { ChefHat, ShoppingCart, Check, CalendarDays, Sparkles, X, Timer, Hand, RefreshCw, ChevronDown, Search, Share2 } from "lucide-react";
 import * as htmlToImage from "html-to-image";
 import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealData.js";
@@ -439,7 +439,7 @@ export default function RealHomeMeal() {
   // 일주일 식단표 생성 — 기본 한 상은 generateWeekPlan이 처리
   //  (안 겹치게 + 무작위 섞기 + 어제와 안 겹치게 + 풀 부족하면 골고루 번갈아).
   //  색다른(별미) 슬라이더는 이 함수 밖에서 별도 처리. "다시 짜기"(regen)마다 새로 섞임.
-  const weekPlan = useMemo(() => {
+  const baseWeekPlan = useMemo(() => {
     const base = generateWeekPlan(MENUS, selected, { eatOutDays: restDays, excludeSpicy });
 
     // 색다른(별미) — needShopping 단품. 슬라이더 빈도만큼 집밥 날에 분산.
@@ -500,6 +500,72 @@ export default function RealHomeMeal() {
       return { day: d.day, mealName: primaryMeal, items, totalMin };
     });
   }, [selected, meals, restDays, specialFreq, excludeSpicy, regen]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // ─── 칸별 "바꾸기" — 이미 짜인 식단표에서 메뉴 한 칸만 같은 역할의 다른 메뉴로 교체 ───
+  //  generateWeekPlan/매칭/데이터는 건드리지 않고, baseWeekPlan 위에 override만 덮어씌운다.
+  const SWAP_RICE = ["잡곡밥", "흰쌀밥", "현미밥", "보리밥"]; // 밥은 데이터가 아니라 고정 밥 종류에서 교체
+
+  // 역할별 "지금 재료로 만들 수 있는" 후보 풀 (밥은 고정 밥 종류)
+  const swapPools = useMemo(() => {
+    const sel = new Set(selected);
+    const byRole = (role) =>
+      MENUS.filter((m) => m.role === role && !m.needShopping && canMake(m, sel)).map((m) => m.name);
+    return { 밥: SWAP_RICE, 국: byRole("guk"), 메인: byRole("main"), 반찬: byRole("banchan") };
+  }, [selected]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // 칸 교체 override: { "요일|아이템index": 새메뉴이름 }. 식단 다시 짜면(=base가 바뀌면) 초기화.
+  const [cellSwaps, setCellSwaps] = useState({});
+  useEffect(() => {
+    setCellSwaps({});
+  }, [selected, meals, restDays, specialFreq, excludeSpicy, regen]);
+
+  // baseWeekPlan + cellSwaps → 실제로 렌더/장보기/추천에 쓰는 weekPlan
+  const weekPlan = useMemo(() => {
+    return baseWeekPlan.map((d) => {
+      if (d.rest || d.special || !d.items) return d;
+      let changed = false;
+      const items = d.items.map((it, i) => {
+        const sw = cellSwaps[`${d.day}|${i}`];
+        if (sw && !it.placeholder && sw !== it.menu) {
+          changed = true;
+          return { ...it, menu: sw };
+        }
+        return it;
+      });
+      if (!changed) return d;
+      const cook = items.filter((it) => !it.placeholder);
+      const totalMin = cook.length ? Math.max(...cook.map((it) => getMeta(it.menu).min)) + (cook.length - 1) * 3 : 0;
+      return { ...d, items, totalMin };
+    });
+  }, [baseWeekPlan, cellSwaps]);
+
+  // 🔄 버튼 핸들러 — 같은 역할의 다른 메뉴로 교체 (이번 주 다른 칸에 안 나온 메뉴 우선)
+  const swapCell = useCallback(
+    (dayName, itemIndex, role, currentMenu) => {
+      const pool = swapPools[role] || [];
+      const others = pool.filter((n) => n !== currentMenu);
+      if (others.length === 0) return; // 후보 없음 (버튼이 숨겨져 있어 사실상 안 불림)
+
+      // 이번 주 다른 칸에 이미 쓰인 메뉴 (지금 보이는 weekPlan 기준) — 다양성 유지용
+      const used = new Set();
+      weekPlan.forEach((d) => {
+        if (d.rest) return;
+        if (d.special) { used.add(d.sp.menu); return; }
+        (d.items || []).forEach((it, i) => {
+          if (!it.placeholder && !(d.day === dayName && i === itemIndex)) used.add(it.menu);
+        });
+      });
+      const fresh = others.filter((n) => !used.has(n));
+      const cands = fresh.length ? fresh : others; // 다 쓰였으면 그냥 후보 전체에서
+
+      let next = cands[Math.floor(Math.random() * cands.length)];
+      for (let g = 0; g < 8 && cands.length > 1 && next === currentMenu; g++) {
+        next = cands[Math.floor(Math.random() * cands.length)];
+      }
+      setCellSwaps((prev) => ({ ...prev, [`${dayName}|${itemIndex}`]: next }));
+    },
+    [swapPools, weekPlan]
+  );
 
   const cookingDays = weekPlan.filter((d) => !d.rest).length;
 
@@ -734,7 +800,7 @@ export default function RealHomeMeal() {
                   <div className="mt-3 grid grid-cols-2 gap-2 sm:grid-cols-4">
                     <MemoCell />
                     {weekPlan.map((d) => (
-                      <DayCell key={d.day} day={d} onOpen={setActiveMenu} />
+                      <DayCell key={d.day} day={d} onOpen={setActiveMenu} onSwap={swapCell} swapPools={swapPools} />
                     ))}
                   </div>
                   {/* 워터마크 */}
@@ -1353,26 +1419,44 @@ function MemoCell() {
 }
 
 // 위클리 플래너 요일 칸 — 요일명(월/MON) + 그날 메뉴를 세로로 (메인만 조금 더 진하게)
-function DayCell({ day, onOpen }) {
+function DayCell({ day, onOpen, onSwap, swapPools }) {
   const header = (color) => (
     <div className="flex items-baseline justify-between px-2.5 pt-2 pb-1.5" style={{ borderBottom: `1px solid ${C.gold}22` }}>
       <span className="text-[14px] font-extrabold leading-none" style={{ color: color || MAIN_TXT }}>{day.day}</span>
       <span className="text-[8px] font-bold tracking-[0.15em]" style={{ color: C.sub }}>{ENG_DAY[day.day] || ""}</span>
     </div>
   );
-  const dish = (menu, strong, key) => (
-    <button
-      key={key}
-      onClick={() => onOpen(menu)}
-      title={menu}
-      className="block w-full truncate text-left leading-snug transition-colors"
-      style={{ color: strong ? MAIN_TXT : SUB_TXT, fontSize: strong ? "12px" : "11px", fontWeight: strong ? 800 : 600 }}
-      onMouseEnter={(e) => (e.currentTarget.style.color = C.gold)}
-      onMouseLeave={(e) => (e.currentTarget.style.color = strong ? MAIN_TXT : SUB_TXT)}
-    >
-      {menu}
-    </button>
-  );
+  // 한 칸(밥/국/메인/반찬): 메뉴명(탭→레시피) + 같은 역할에 다른 후보가 있으면 🔄(탭→교체)
+  const dish = (it, idx) => {
+    const strong = it.role === "메인";
+    const base = strong ? MAIN_TXT : SUB_TXT;
+    const canSwap = !!onSwap && (swapPools?.[it.role]?.length || 0) > 1;
+    return (
+      <div key={idx} className="flex items-center gap-0.5">
+        <button
+          onClick={() => onOpen(it.menu)}
+          title={it.menu}
+          className="min-w-0 flex-1 truncate text-left leading-snug transition-colors"
+          style={{ color: base, fontSize: strong ? "12px" : "11px", fontWeight: strong ? 800 : 600 }}
+          onMouseEnter={(e) => (e.currentTarget.style.color = C.gold)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = base)}
+        >
+          {it.menu}
+        </button>
+        {canSwap && (
+          <button
+            onClick={() => onSwap(day.day, idx, it.role, it.menu)}
+            title="다른 메뉴로 바꾸기"
+            aria-label={`${it.menu} 다른 메뉴로 바꾸기`}
+            className="shrink-0 rounded leading-none opacity-40 transition-opacity hover:opacity-90"
+            style={{ fontSize: "10px", padding: "1px" }}
+          >
+            🔄
+          </button>
+        )}
+      </div>
+    );
+  };
 
   // 외식 day — 크림색(일반 흰 칸과 살짝 다른 따뜻한 톤). 초록은 MEMO 전용.
   if (day.rest) {
@@ -1411,23 +1495,22 @@ function DayCell({ day, onOpen }) {
     );
   }
 
-  // 일반 한 상 — 밥·국·메인·반찬 세로로
+  // 일반 한 상 — 밥·국·메인·반찬 세로로 (items 순서 = 밥→국→메인→반찬)
   const items = day.items || [];
-  const main = items.find((it) => it.role === "메인" && !it.placeholder);
-  const mainEmpty = items.some((it) => it.role === "메인" && it.placeholder);
-  const bap = items.find((it) => it.role === "밥");
-  const guk = items.find((it) => it.role === "국" && !it.placeholder);
-  const gukEmpty = items.some((it) => it.role === "국" && it.placeholder);
-  const banchans = items.filter((it) => it.role === "반찬");
 
   return (
     <div className={CELL} style={CELL_STYLE}>
       {header()}
       <div className="flex-1 space-y-[3px] px-2.5 py-2">
-        {bap && dish(bap.menu, false, "bap")}
-        {guk ? dish(guk.menu, false, "guk") : gukEmpty ? <span className="block text-[11px]" style={{ color: FAINT }}>국 없음</span> : null}
-        {main ? dish(main.menu, true, "main") : mainEmpty ? <span className="block text-[11px] font-semibold" style={{ color: FAINT }}>메인 없음</span> : null}
-        {banchans.map((b, i) => dish(b.menu, false, "b" + i))}
+        {items.map((it, i) =>
+          it.placeholder ? (
+            <span key={i} className="block text-[11px] font-semibold" style={{ color: FAINT }}>
+              {it.role === "메인" ? "메인 없음" : it.role === "국" ? "국 없음" : it.menu}
+            </span>
+          ) : (
+            dish(it, i)
+          )
+        )}
       </div>
     </div>
   );

@@ -1419,11 +1419,13 @@ function MemoCell() {
 
 // 위클리 플래너 — 요일별 가로 줄. 왼쪽 요일 라벨 + 윗줄(밥·국) / 아랫줄(메인·반찬). 글자 잘림 없음.
 function DayCell({ day, onOpen, onSwap, swapPools }) {
+  // 요일 라벨 색 — 달력 관습: 평일 검정(진한 회색) / 토 파랑 / 일 빨강 (외식 day도 동일 적용)
+  const DOW_COLOR = day.day === "토" ? "#2563EB" : day.day === "일" ? "#DC2626" : "#333333";
   // 요일 라벨 (왼쪽 고정 블록)
-  const label = (color) => (
+  const label = () => (
     <div className="flex w-12 shrink-0 flex-col items-center justify-center self-stretch py-1.5" style={{ borderRight: `1px solid ${C.gold}22` }}>
-      <span className="text-[15px] font-extrabold leading-none" style={{ color: color || MAIN_TXT }}>{day.day}</span>
-      <span className="mt-0.5 text-[8px] font-bold tracking-[0.12em]" style={{ color: C.sub }}>{ENG_DAY[day.day] || ""}</span>
+      <span className="text-[15px] font-extrabold leading-none" style={{ color: DOW_COLOR }}>{day.day}</span>
+      <span className="mt-0.5 text-[8px] font-bold tracking-[0.12em]" style={{ color: DOW_COLOR, opacity: 0.72 }}>{ENG_DAY[day.day] || ""}</span>
     </div>
   );
 
@@ -1462,8 +1464,8 @@ function DayCell({ day, onOpen, onSwap, swapPools }) {
   // 외식 day — 한 줄로 간결하게
   if (day.rest) {
     return (
-      <div className={ROW} style={{ ...ROW_STYLE, background: "#FCF7EE", border: `1px solid ${C.gold}22` }}>
-        {label(C.sub)}
+      <div className={ROW} style={{ ...ROW_STYLE, background: "#FFFCF6", border: `1px solid ${C.gold}22` }}>
+        {label()}
         <div className="flex flex-1 items-center px-3 py-2.5">
           <span className="text-[12.5px] font-bold" style={{ color: C.sub }}>외식 day 🍴</span>
         </div>

@@ -4,7 +4,7 @@ import * as htmlToImage from "html-to-image";
 import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealData.js";
 import { generateWeekPlan } from "./generateWeekPlan.js";
 import { parseReceiptText } from "./receiptParser.js";
-import Tesseract from "tesseract.js";
+import Tesseract, { PSM } from "tesseract.js";
 
 /* ------------------------------------------------------------------ *
  *  오늘 뭐 먹지? (현실 집밥 편)
@@ -1770,23 +1770,52 @@ function AddSheet({ open, onClose, selected, onToggle, custom = [], onAddCustom,
 // 📝 영수증/주문내역 → 재료 담기 시트
 //  1) 텍스트 붙여넣기(나중에 OCR로 텍스트를 채우면 그대로 재사용 가능) → parseReceiptText
 //  2) 인식 결과 체크박스 확인(오인식 해제 / 빠진 것 직접 추가) → selected에 담기
+// 영수증 사진 전처리 — 흑백(그레이스케일) + 대비 강화 (작고 흐린 글자 인식률 ↑)
+function preprocessReceiptImage(file) {
+  return new Promise((resolve) => {
+    const img = new Image();
+    img.onload = () => {
+      const maxSide = Math.max(img.width, img.height);
+      const scale = maxSide > 0 && maxSide < 1100 ? 1100 / maxSide : 1; // 작으면 키워 또렷하게
+      const cv = document.createElement("canvas");
+      cv.width = Math.round(img.width * scale);
+      cv.height = Math.round(img.height * scale);
+      const ctx = cv.getContext("2d");
+      ctx.drawImage(img, 0, 0, cv.width, cv.height);
+      try {
+        const id = ctx.getImageData(0, 0, cv.width, cv.height);
+        const d = id.data;
+        const contrast = 1.7; // 대비 강화
+        const intercept = 128 * (1 - contrast);
+        for (let i = 0; i < d.length; i += 4) {
+          let g = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2]; // grayscale
+          g = g * contrast + intercept; // contrast
+          g = g < 0 ? 0 : g > 255 ? 255 : g;
+          d[i] = d[i + 1] = d[i + 2] = g;
+        }
+        ctx.putImageData(id, 0, 0);
+      } catch { /* getImageData 실패 시 원본 그대로 사용 */ }
+      try { URL.revokeObjectURL(img.src); } catch { /* noop */ }
+      resolve(cv);
+    };
+    img.onerror = () => resolve(null);
+    img.src = URL.createObjectURL(file);
+  });
+}
+
 function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
-  const [step, setStep] = useState("input"); // "input" | "confirm"
-  const [text, setText] = useState("");
-  const [matched, setMatched] = useState([]); // 인식된 재료 [name]
-  const [ignored, setIgnored] = useState([]); // 무시한 줄(양념 등)
-  const [checked, setChecked] = useState({}); // { name: bool }
+  const [text, setText] = useState(""); // 원본 텍스트 (OCR/붙여넣기, 수정 가능)
+  const [unchecked, setUnchecked] = useState({}); // 사용자가 체크 해제한 재료 { name: true }
+  const [manualAdds, setManualAdds] = useState([]); // 직접 추가한 재료
   const [draft, setDraft] = useState(""); // 직접 추가 입력
   const [ocrBusy, setOcrBusy] = useState(false); // 사진 OCR 진행 중
   const [ocrPct, setOcrPct] = useState(0); // OCR 진행률 %
-  const cameraInputRef = useRef(null); // 📷 후면 카메라 바로 켜기
-  const galleryInputRef = useRef(null); // 🖼️ 갤러리에서 선택
+  const cameraInputRef = useRef(null);
+  const galleryInputRef = useRef(null);
 
   useEffect(() => {
     if (open) return;
-    // 닫히면 초기화
-    setStep("input"); setText(""); setMatched([]); setIgnored([]); setChecked({}); setDraft("");
-    setOcrBusy(false); setOcrPct(0);
+    setText(""); setUnchecked({}); setManualAdds([]); setDraft(""); setOcrBusy(false); setOcrPct(0);
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -1796,59 +1825,61 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
   }, [open, onClose]);
   if (!open) return null;
 
-  // 사진 → tesseract.js 한국어 OCR → 추출 텍스트를 textarea에 채움 (그 뒤는 기존 흐름 재사용)
+  // ⚡ 텍스트가 바뀔 때마다 즉시 다시 매칭 (사용자가 깨진 글자를 고치면 바로 반영)
+  const parsed = parseReceiptText(text);
+  const candidates = [...new Set([...parsed.matched, ...manualAdds])]; // 인식 + 직접 추가
+  const isChecked = (name) => !unchecked[name];
+  const checkedList = candidates.filter(isChecked);
+  const hasText = text.trim().length > 0;
+  // 폴백 안내 조건: 텍스트는 있는데 잡힌 재료가 없을 때
+  const showFallback = hasText && candidates.length === 0;
+
+  // 📷 사진 → 전처리(흑백·대비) → tesseract OCR(kor, PSM=단일 블록) → textarea에 채움
   const onPhoto = async (e) => {
     const file = e.target.files && e.target.files[0];
-    e.target.value = ""; // 같은 사진 다시 선택 가능하게 초기화
+    e.target.value = "";
     if (!file) return;
     setOcrBusy(true);
     setOcrPct(0);
+    let worker;
     try {
-      const { data } = await Tesseract.recognize(file, "kor", {
+      const pre = await preprocessReceiptImage(file);
+      worker = await Tesseract.createWorker("kor", 1, {
         logger: (m) => { if (m.status === "recognizing text") setOcrPct(Math.round((m.progress || 0) * 100)); },
       });
+      await worker.setParameters({ tessedit_pageseg_mode: PSM.SINGLE_BLOCK }); // 영수증=한 블록 세로 텍스트
+      const { data } = await worker.recognize(pre || file);
       const extracted = (data.text || "").trim();
+      console.log("📷 [OCR 원본 텍스트]\n" + extracted);
       setText((prev) => (prev.trim() ? prev.trim() + "\n" + extracted : extracted));
     } catch (err) {
       console.error("OCR failed:", err);
       alert("사진을 읽지 못했어요. 다시 찍거나 텍스트로 붙여넣어 주세요 🙏");
     } finally {
+      if (worker) { try { await worker.terminate(); } catch { /* noop */ } }
       setOcrBusy(false);
     }
   };
 
-  const runParse = () => {
-    const { matched: m, ignored: ig } = parseReceiptText(text);
-    setMatched(m);
-    setIgnored(ig);
-    const c = {};
-    m.forEach((i) => { c[i] = true; }); // 전부 기본 체크
-    setChecked(c);
-    setStep("confirm");
-  };
-  const toggle = (name) => setChecked((p) => ({ ...p, [name]: !p[name] }));
+  const toggle = (name) => setUnchecked((p) => ({ ...p, [name]: !p[name] }));
   const addManual = () => {
     const name = draft.trim();
     if (!name) return;
-    if (!matched.includes(name)) {
-      setMatched((p) => [...p, name]);
-      setChecked((p) => ({ ...p, [name]: true }));
-    }
+    if (!candidates.includes(name)) setManualAdds((p) => [...p, name]);
+    setUnchecked((p) => { const n = { ...p }; delete n[name]; return n; }); // 추가하면 체크 상태로
     setDraft("");
   };
   const confirmAdd = () => {
-    onAdd(matched.filter((i) => checked[i]));
+    onAdd(checkedList);
     onClose();
   };
-
-  const checkedCount = matched.filter((i) => checked[i]).length;
 
   return (
     <div className="fixed inset-0 z-50 flex items-end justify-center">
       <div onClick={onClose} className={`absolute inset-0 ${reduced ? "" : "fade-in"}`} style={{ background: "rgba(35,28,22,0.45)" }} />
       <div
         className={`relative flex w-full max-w-[480px] flex-col ${reduced ? "" : "sheet-up"}`}
-        style={{ maxHeight: "85vh", background: C.canvas, borderTopLeftRadius: 26, borderTopRightRadius: 26, boxShadow: "0 -18px 50px -20px rgba(58,42,32,0.5)", fontFamily: "'Paperlogy','Inter','Pretendard',system-ui,sans-serif" }}
+        style={{ maxHeight: "88vh", background: C.canvas, borderTopLeftRadius: 26, borderTopRightRadius: 26, boxShadow: "0 -18px 50px -20px rgba(58,42,32,0.5)", fontFamily: "'Paperlogy','Inter','Pretendard',system-ui,sans-serif" }}
       >
         <div className="flex justify-center pt-3">
           <span className="h-1.5 w-10 rounded-full" style={{ background: C.line }} />
@@ -1862,9 +1893,9 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
           </button>
         </div>
 
-        {step === "input" ? (
-          <div className="flex flex-col gap-3 overflow-y-auto px-5 pb-5 pt-2">
-            {/* 📷 사진 입구 — 카메라 촬영 / 갤러리 선택 → OCR로 텍스트 추출 */}
+        <div className="flex flex-col overflow-hidden">
+          <div className="flex-1 overflow-y-auto px-5 pb-2 pt-2">
+            {/* 📷 사진 입구 */}
             <div className="flex gap-2">
               <button
                 onClick={() => cameraInputRef.current && cameraInputRef.current.click()}
@@ -1883,112 +1914,98 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
                 🖼️ 사진 선택
               </button>
             </div>
-            {/* 후면 카메라 바로 켜기(capture) / 갤러리(capture 없음). PC는 둘 다 파일 선택으로 동작 */}
             <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
             <input ref={galleryInputRef} type="file" accept="image/*" className="hidden" onChange={onPhoto} />
 
             {ocrBusy && (
-              <div className="flex items-center justify-center gap-2 rounded-2xl py-3 text-[13.5px] font-bold" style={{ background: C.goldSoft, color: C.gold }}>
+              <div className="mt-3 flex items-center justify-center gap-2 rounded-2xl py-3 text-[13.5px] font-bold" style={{ background: C.goldSoft, color: C.gold }}>
                 <span className={reduced ? "" : "bounce-food"}>🔍</span>
                 영수증 읽는 중… {ocrPct > 0 ? `${ocrPct}%` : ""}
               </div>
             )}
 
-            <div className="flex items-center gap-2">
-              <span className="h-px flex-1" style={{ background: C.line }} />
-              <span className="text-[11px] font-semibold" style={{ color: C.sub }}>또는 텍스트로</span>
-              <span className="h-px flex-1" style={{ background: C.line }} />
-            </div>
-
-            <p className="text-[12.5px] leading-relaxed" style={{ color: C.sub }}>
-              마트 영수증 내용이나 쿠팡 주문내역을 붙여넣으세요.<br />
-              사진을 찍으면 글자를 읽어 아래 칸에 채워드려요 (틀린 글자는 직접 고칠 수 있어요).
+            {/* 수정 가능한 텍스트 — OCR이 채우고, 사용자가 고치면 아래 재료가 즉시 갱신 */}
+            <p className="mb-1.5 mt-3 text-[12px]" style={{ color: C.sub }}>
+              읽은 글자예요. 깨진 글자는 고쳐주세요 — 고치는 즉시 재료가 다시 잡혀요.
             </p>
             <textarea
               value={text}
               onChange={(e) => setText(e.target.value)}
-              placeholder={"예)\n돼지고기 앞다리 600g\n애호박 1개\n두부 2모\n계란 한판\n대파 한단"}
-              rows={8}
+              placeholder={"사진을 찍거나, 영수증/쿠팡 주문내역을 붙여넣으세요.\n예)\n돼지고기 앞다리 600g\n애호박 1개\n두부 2모\n계란 한판"}
+              rows={6}
               className="w-full resize-none rounded-2xl px-3.5 py-3 text-[13.5px] leading-relaxed outline-none"
               style={{ background: "#fff", border: `1px solid ${C.line}`, color: C.ink }}
             />
+
+            {/* 인식된 재료 (실시간) */}
+            <div className="mt-3 flex items-center justify-between">
+              <span className="text-[12.5px] font-bold" style={{ color: C.ink }}>인식된 재료</span>
+              <span className="text-[11.5px] font-semibold" style={{ color: C.sub }}>{checkedList.length}개 담을 예정</span>
+            </div>
+            {candidates.length > 0 ? (
+              <div className="mt-1.5 flex flex-col gap-1.5">
+                {candidates.map((name) => (
+                  <button
+                    key={name}
+                    onClick={() => toggle(name)}
+                    className="flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all"
+                    style={{ background: isChecked(name) ? C.goldSoft : "#fff", border: `1px solid ${isChecked(name) ? C.gold + "66" : C.line}` }}
+                  >
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ background: isChecked(name) ? C.gold : "#fff", border: `1.5px solid ${isChecked(name) ? C.gold : C.line}` }}>
+                      {isChecked(name) && <Check size={13} strokeWidth={3.2} color="#fff" />}
+                    </span>
+                    <span className="text-[14px] font-semibold" style={{ color: C.ink }}>{name}</span>
+                    {selected.includes(name) && (
+                      <span className="ml-auto text-[10.5px] font-bold" style={{ color: C.sage }}>이미 담음</span>
+                    )}
+                  </button>
+                ))}
+              </div>
+            ) : showFallback ? (
+              <p className="mt-1.5 rounded-2xl px-4 py-5 text-center text-[12.5px] leading-relaxed" style={{ background: "#FFF6F2", border: `1px dashed ${C.gold}66`, color: C.sub }}>
+                사진이 잘 안 읽혔어요 🥲<br />
+                위 텍스트에서 깨진 글자를 직접 고치거나,<br />
+                쿠팡 주문내역을 붙여넣어 보세요.
+              </p>
+            ) : (
+              <p className="mt-1.5 rounded-2xl px-4 py-5 text-center text-[12.5px]" style={{ background: "#fff", border: `1px dashed ${C.line}`, color: C.sub }}>
+                사진을 찍거나 텍스트를 넣으면 재료를 찾아드려요 🧺
+              </p>
+            )}
+
+            {/* 직접 추가 */}
+            <div className="mt-3 flex items-center gap-2">
+              <input
+                value={draft}
+                onChange={(e) => setDraft(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && addManual()}
+                placeholder="빠진 재료 직접 추가 (예: 양파)"
+                className="min-w-0 flex-1 rounded-2xl px-3.5 py-2.5 text-[13.5px] outline-none"
+                style={{ background: "#fff", border: `1px solid ${C.line}`, color: C.ink }}
+              />
+              <button onClick={addManual} className="shrink-0 rounded-2xl px-4 py-2.5 text-[13px] font-bold" style={{ background: C.goldSoft, color: C.gold, border: `1px solid ${C.gold}55` }}>
+                추가
+              </button>
+            </div>
+
+            {parsed.ignored.length > 0 && (
+              <p className="mt-3 text-[11px] leading-snug" style={{ color: C.sub }}>
+                양념·기타 {parsed.ignored.length}줄은 제외했어요.
+              </p>
+            )}
+          </div>
+
+          <div className="border-t px-5 py-3" style={{ borderColor: C.line }}>
             <button
-              onClick={runParse}
-              disabled={!text.trim()}
-              className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[15px] font-bold transition-all"
-              style={{ background: text.trim() ? C.gold : C.line, color: "#fff", boxShadow: text.trim() ? "0 14px 28px -16px rgba(217,96,63,0.9)" : "none" }}
+              onClick={confirmAdd}
+              disabled={checkedList.length === 0}
+              className="flex w-full items-center justify-center gap-1.5 rounded-2xl py-3.5 text-[15px] font-bold transition-all"
+              style={{ background: checkedList.length ? C.gold : C.line, color: "#fff", boxShadow: checkedList.length ? "0 14px 28px -16px rgba(217,96,63,0.9)" : "none" }}
             >
-              🔎 재료 찾기
+              🧺 이 재료들 냉장고에 담기 {checkedList.length > 0 && `(${checkedList.length})`}
             </button>
           </div>
-        ) : (
-          <div className="flex flex-col overflow-hidden">
-            <div className="flex-1 overflow-y-auto px-5 pb-2 pt-1">
-              <p className="mb-2 text-[12.5px]" style={{ color: C.sub }}>
-                인식된 재료예요. 잘못된 건 체크를 풀고, 빠진 건 아래에서 추가하세요.
-              </p>
-              {matched.length > 0 ? (
-                <div className="flex flex-col gap-1.5">
-                  {matched.map((name) => (
-                    <button
-                      key={name}
-                      onClick={() => toggle(name)}
-                      className="flex w-full items-center gap-2.5 rounded-2xl px-3 py-2.5 text-left transition-all"
-                      style={{ background: checked[name] ? C.goldSoft : "#fff", border: `1px solid ${checked[name] ? C.gold + "66" : C.line}` }}
-                    >
-                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-md" style={{ background: checked[name] ? C.gold : "#fff", border: `1.5px solid ${checked[name] ? C.gold : C.line}` }}>
-                        {checked[name] && <Check size={13} strokeWidth={3.2} color="#fff" />}
-                      </span>
-                      <span className="text-[14px] font-semibold" style={{ color: C.ink }}>{name}</span>
-                      {selected.includes(name) && (
-                        <span className="ml-auto text-[10.5px] font-bold" style={{ color: C.sage }}>이미 담음</span>
-                      )}
-                    </button>
-                  ))}
-                </div>
-              ) : (
-                <p className="rounded-2xl px-4 py-6 text-center text-[13px]" style={{ background: "#fff", border: `1px dashed ${C.line}`, color: C.sub }}>
-                  인식된 재료가 없어요. 아래에서 직접 추가하거나, 텍스트를 다시 확인해 주세요.
-                </p>
-              )}
-
-              {/* 직접 추가 */}
-              <div className="mt-3 flex items-center gap-2">
-                <input
-                  value={draft}
-                  onChange={(e) => setDraft(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && addManual()}
-                  placeholder="빠진 재료 직접 추가 (예: 양파)"
-                  className="min-w-0 flex-1 rounded-2xl px-3.5 py-2.5 text-[13.5px] outline-none"
-                  style={{ background: "#fff", border: `1px solid ${C.line}`, color: C.ink }}
-                />
-                <button onClick={addManual} className="shrink-0 rounded-2xl px-4 py-2.5 text-[13px] font-bold" style={{ background: C.goldSoft, color: C.gold, border: `1px solid ${C.gold}55` }}>
-                  추가
-                </button>
-              </div>
-
-              {ignored.length > 0 && (
-                <p className="mt-3 text-[11px] leading-snug" style={{ color: C.sub }}>
-                  양념·기타 {ignored.length}줄은 제외했어요.
-                </p>
-              )}
-            </div>
-
-            <div className="flex gap-2 border-t px-5 py-3" style={{ borderColor: C.line }}>
-              <button onClick={() => setStep("input")} className="shrink-0 rounded-2xl px-4 py-3.5 text-[14px] font-bold" style={{ background: "#fff", color: C.ink, border: `1px solid ${C.line}` }}>
-                ‹ 다시
-              </button>
-              <button
-                onClick={confirmAdd}
-                disabled={checkedCount === 0}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl py-3.5 text-[15px] font-bold transition-all"
-                style={{ background: checkedCount ? C.gold : C.line, color: "#fff", boxShadow: checkedCount ? "0 14px 28px -16px rgba(217,96,63,0.9)" : "none" }}
-              >
-                🧺 이 재료들 냉장고에 담기 {checkedCount > 0 && `(${checkedCount})`}
-              </button>
-            </div>
-          </div>
-        )}
+        </div>
       </div>
     </div>
   );

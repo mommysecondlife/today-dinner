@@ -1895,25 +1895,32 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
 
         <div className="flex flex-col overflow-hidden">
           <div className="flex-1 overflow-y-auto px-5 pb-2 pt-2">
-            {/* 📷 사진 입구 */}
-            <div className="flex gap-2">
-              <button
-                onClick={() => cameraInputRef.current && cameraInputRef.current.click()}
-                disabled={ocrBusy}
-                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl py-3 text-[13.5px] font-bold transition-all"
-                style={{ background: ocrBusy ? C.line : C.gold, color: "#fff", boxShadow: ocrBusy ? "none" : "0 12px 24px -16px rgba(217,96,63,0.9)" }}
-              >
-                📷 영수증 사진 찍기
-              </button>
-              <button
-                onClick={() => galleryInputRef.current && galleryInputRef.current.click()}
-                disabled={ocrBusy}
-                className="flex shrink-0 items-center justify-center gap-1 rounded-2xl px-4 py-3 text-[13.5px] font-bold transition-all"
-                style={{ background: "#fff", color: C.gold, border: `1px solid ${C.gold}55`, opacity: ocrBusy ? 0.5 : 1 }}
-              >
-                🖼️ 사진 선택
-              </button>
-            </div>
+            {/* 안내 — 주문내역 캡처가 인식률이 가장 좋아 그쪽으로 유도 */}
+            <p
+              className="mb-3 rounded-2xl px-3.5 py-2.5 text-[12.5px] font-semibold leading-relaxed"
+              style={{ background: C.goldSoft, color: C.gold, border: `1px solid ${C.gold}44` }}
+            >
+              📱 쿠팡·마켓컬리 등 주문내역을 캡처해서 올리면 가장 잘 인식돼요!
+              <span className="font-medium" style={{ color: C.sub }}> (종이 영수증은 흐릴 수 있어요)</span>
+            </p>
+
+            {/* 📷 사진 입구 — 갤러리(주문내역 캡처)가 메인, 카메라는 보조 */}
+            <button
+              onClick={() => galleryInputRef.current && galleryInputRef.current.click()}
+              disabled={ocrBusy}
+              className="flex w-full items-center justify-center gap-2 rounded-2xl py-3.5 text-[15px] font-bold transition-all"
+              style={{ background: ocrBusy ? C.line : C.gold, color: "#fff", boxShadow: ocrBusy ? "none" : "0 14px 28px -16px rgba(217,96,63,0.9)" }}
+            >
+              🖼️ 주문내역 캡처 올리기
+            </button>
+            <button
+              onClick={() => cameraInputRef.current && cameraInputRef.current.click()}
+              disabled={ocrBusy}
+              className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-2xl py-2.5 text-[13px] font-bold transition-all"
+              style={{ background: "#fff", color: C.gold, border: `1px solid ${C.gold}55`, opacity: ocrBusy ? 0.5 : 1 }}
+            >
+              📷 영수증 사진 찍기
+            </button>
             <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
             <input ref={galleryInputRef} type="file" accept="image/*" className="hidden" onChange={onPhoto} />
 

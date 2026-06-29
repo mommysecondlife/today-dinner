@@ -482,7 +482,7 @@ export default function RealHomeMeal() {
   //  (안 겹치게 + 무작위 섞기 + 어제와 안 겹치게 + 풀 부족하면 골고루 번갈아).
   //  색다른(별미) 슬라이더는 이 함수 밖에서 별도 처리. "다시 짜기"(regen)마다 새로 섞임.
   const baseWeekPlan = useMemo(() => {
-    const base = generateWeekPlan(MENUS, selected, { eatOutDays: restDays, excludeSpicy });
+    const base = generateWeekPlan(MENUS, selected, { eatOutDays: restDays, excludeSpicy, meals });
 
     // 색다른(별미) — needShopping 단품. 슬라이더 빈도만큼 집밥 날에 분산.
     const selSet = new Set(selected);
@@ -529,17 +529,33 @@ export default function RealHomeMeal() {
           };
         }
       }
-      // 일반 한 상 — 밥/국/메인/반찬을 칩 렌더용 items 배열로 (김치는 강제로 넣지 않음)
+      // 끼니별 한 상 → 칩 렌더용 items 배열로 (각 item에 meal 태그). 끼니 순서: 아침→점심→저녁.
       const items = [];
-      if (d.bap) items.push({ role: "밥", menu: d.bap.name });
-      if (d.gukEmpty) items.push({ role: "국", placeholder: true, menu: "재료를 더 담으면 국이 늘어나요 🍲" });
-      else if (d.guk) items.push({ role: "국", menu: d.guk.name });
-      if (d.mainEmpty) items.push({ role: "메인", placeholder: true, menu: "재료를 더 담으면 메인이 늘어나요 🍖" });
-      else if (d.main) items.push({ role: "메인", menu: d.main.name });
-      (d.banchan || []).forEach((b) => items.push({ role: "반찬", menu: b.name }));
+      const mealsInDay = [];
+      ["아침", "점심", "저녁"].forEach((meal) => {
+        const mm = d.byMeal?.[meal];
+        if (!mm) return;
+        mealsInDay.push(meal);
+        if (meal === "아침") {
+          if (mm.simple) items.push({ role: "아침", menu: mm.simple.name, meal });
+          else items.push({ role: "아침", placeholder: true, menu: "재료를 더 담으면 아침이 생겨요 🌅", meal });
+        } else if (meal === "점심") {
+          if (mm.bap) items.push({ role: "밥", menu: mm.bap.name, meal });
+          if (mm.mainEmpty) items.push({ role: "메인", placeholder: true, menu: "재료를 더 담으면 메인이 늘어나요 🍖", meal });
+          else if (mm.main) items.push({ role: "메인", menu: mm.main.name, meal });
+          (mm.banchan || []).forEach((b) => items.push({ role: "반찬", menu: b.name, meal }));
+        } else {
+          if (mm.bap) items.push({ role: "밥", menu: mm.bap.name, meal });
+          if (mm.gukEmpty) items.push({ role: "국", placeholder: true, menu: "재료를 더 담으면 국이 늘어나요 🍲", meal });
+          else if (mm.guk) items.push({ role: "국", menu: mm.guk.name, meal });
+          if (mm.mainEmpty) items.push({ role: "메인", placeholder: true, menu: "재료를 더 담으면 메인이 늘어나요 🍖", meal });
+          else if (mm.main) items.push({ role: "메인", menu: mm.main.name, meal });
+          (mm.banchan || []).forEach((b) => items.push({ role: "반찬", menu: b.name, meal }));
+        }
+      });
       const cook = items.filter((it) => !it.placeholder);
       const totalMin = cook.length ? Math.max(...cook.map((it) => getMeta(it.menu).min)) + (cook.length - 1) * 3 : 0;
-      return { day: d.day, mealName: primaryMeal, items, totalMin };
+      return { day: d.day, mealName: primaryMeal, items, totalMin, multiMeal: mealsInDay.length > 1 };
     });
     // 의존성은 regen만 — "식단 짜기/다시 짜기"로만 새로 생성(스냅샷). 추천 메뉴 꽂기로 selected가 바뀌어도
     // 전체 식단이 다시 섞이지 않게(=꽂은 칸만 바뀌게) 한다. 생성 시점의 selected/설정값은 클로저로 읽음.
@@ -591,13 +607,13 @@ export default function RealHomeMeal() {
         const sw = cellSwaps[`${d.day}|${i}`];
         return sw && !it.placeholder && sw !== it.menu ? { ...it, menu: sw } : it;
       });
-      // 2) 추천 메뉴 꽂기(역할 기반) — 같은 역할 자리 교체, 없으면 추가
+      // 2) 추천 메뉴 꽂기(역할 기반) — 같은 역할 자리 교체, 없으면 추가 (meal 태그 보존)
       ["밥", "국", "메인", "반찬"].forEach((role) => {
         const ins = planInserts[`${d.day}|${role}`];
         if (!ins) return;
         const idx = items.findIndex((it) => it.role === role);
-        if (idx >= 0) items = items.map((it, i) => (i === idx ? { role, menu: ins } : it));
-        else items = [...items, { role, menu: ins }];
+        if (idx >= 0) items = items.map((it, i) => (i === idx ? { ...it, role, menu: ins, placeholder: false } : it));
+        else items = [...items, { role, menu: ins, meal: items[0]?.meal || "저녁" }];
       });
 
       const cook = items.filter((it) => !it.placeholder);
@@ -1618,6 +1634,8 @@ function SeasonalSection({ currentMonth, selected, onToggle, onOpenMenu }) {
 
 // 위클리 플래너 — 요일별 가로 줄
 const ENG_DAY = { 월: "MON", 화: "TUE", 수: "WED", 목: "THU", 금: "FRI", 토: "SAT", 일: "SUN" };
+// 끼니 라벨 (여러 끼니 선택 시 칸 안에서 구분용)
+const MEAL_TAG = { 아침: "🌅 아침", 점심: "☀️ 점심", 저녁: "🌙 저녁" };
 const FAINT = "#B6A48C"; // 메인/국 없음
 const MAIN_TXT = "#3A2A20"; // 메인 (조금 더 진하게)
 const SUB_TXT = "#5A4636"; // 밥·국·반찬
@@ -1712,10 +1730,8 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
     );
   }
 
-  // 일반 한 상 — 윗줄: 밥+국 / 아랫줄: 메인+반찬 (items 순서 = 밥→국→메인→반찬)
+  // 일반 한 상 — 끼니별 섹션. 끼니 1개면 라벨 없이(기존과 동일), 여러 개면 끼니 라벨로 구분.
   const items = (day.items || []).map((it, i) => ({ ...it, _i: i }));
-  const topItems = items.filter((it) => it.role === "밥" || it.role === "국");
-  const bottomItems = items.filter((it) => it.role === "메인" || it.role === "반찬");
   const renderItem = (it) =>
     it.placeholder ? (
       <span key={it._i} className="text-[12px] font-semibold" style={{ color: FAINT }}>
@@ -1725,16 +1741,27 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
       dish(it, it._i)
     );
 
+  const mealsPresent = [...new Set(items.map((it) => it.meal || "저녁"))]; // items 순서 = 아침→점심→저녁
+  const showMealLabels = mealsPresent.length > 1;
+
   return (
     <div className={`day-row ${ROW}`} style={ROW_STYLE}>
       {label()}
-      <div className="flex flex-1 flex-col justify-center gap-1.5 px-3.5 py-3">
-        {/* 윗줄: 밥 + 국 */}
-        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{topItems.map(renderItem)}</div>
-        {/* 아랫줄: 메인 + 반찬 */}
-        {bottomItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{bottomItems.map(renderItem)}</div>
-        )}
+      <div className="flex flex-1 flex-col justify-center gap-2 px-3.5 py-3">
+        {mealsPresent.map((meal) => {
+          const mealItems = items.filter((it) => (it.meal || "저녁") === meal);
+          const top = mealItems.filter((it) => it.role === "밥" || it.role === "국");
+          const bottom = mealItems.filter((it) => it.role === "메인" || it.role === "반찬" || it.role === "아침");
+          return (
+            <div key={meal} className="flex flex-col gap-1">
+              {showMealLabels && (
+                <span className="text-[9.5px] font-extrabold tracking-wide" style={{ color: C.gold }}>{MEAL_TAG[meal] || meal}</span>
+              )}
+              {top.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{top.map(renderItem)}</div>}
+              {bottom.length > 0 && <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{bottom.map(renderItem)}</div>}
+            </div>
+          );
+        })}
       </div>
     </div>
   );

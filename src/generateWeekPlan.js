@@ -42,6 +42,12 @@ function isMakeable(menu, fridgeSet) {
   return menu.req.every(i => fridgeSet.has(i) || PANTRY.has(i));
 }
 
+// 아침 간단식 가능 여부 — needShopping(식빵 등)이어도 req만 충족되면 OK(사면 되니까). req 비어도 OK(누룽지 등).
+function breakfastMakeable(menu, fridgeSet) {
+  if (!menu.req || menu.req.length === 0) return true;
+  return menu.req.every(i => fridgeSet.has(i) || PANTRY.has(i));
+}
+
 // 메뉴 이름에서 조리법 추출 (위에서부터 먼저 매칭되는 것 사용) — 같은 날 반찬 조리법 다양화용
 function getMethod(name) {
   if (/무침|겉절이|생채|나물/.test(name)) return '무침';
@@ -63,7 +69,7 @@ function getMethod(name) {
  * @returns {Array} 7일 식단
  */
 export function generateWeekPlan(menus, fridge, opts = {}) {
-  const { eatOutDays = [], excludeSpicy = false } = opts;
+  const { eatOutDays = [], excludeSpicy = false, meals = ['저녁'] } = opts;
   const fridgeSet = new Set(fridge);
 
   let makeable = menus.filter(m => isMakeable(m, fridgeSet));
@@ -75,55 +81,79 @@ export function generateWeekPlan(menus, fridge, opts = {}) {
     banchan: makeable.filter(m => m.role === 'banchan'),
   };
 
+  // 아침 풀 — meal:"아침" 메뉴. needShopping 아닌 것 우선, 부족하면(<4개) needShopping 포함.
+  let breakfastAll = menus.filter(m => m.meal === '아침' && breakfastMakeable(m, fridgeSet));
+  if (excludeSpicy) breakfastAll = breakfastAll.filter(m => !m.spicy);
+  const breakfastNoShop = breakfastAll.filter(m => !m.needShopping);
+  const breakfastPool = breakfastNoShop.length >= 4 ? breakfastNoShop : breakfastAll;
+
   const riceRot = makeRotator(RICE.map(n => ({ name: n, emoji: '🍚', role: 'bap' })));
   const gukRot = makeRotator(pool.guk);
   const mainRot = makeRotator(pool.main);
   const banchanRot = makeRotator(pool.banchan);
+  const breakfastRot = makeRotator(breakfastPool);
 
-  let prev = { bap: '', guk: '', main: '', banchan: [] };
+  // 끼니 순서(아침→점심→저녁) 중 선택된 것만. 비면 저녁 기본.
+  const order = ['아침', '점심', '저녁'].filter(m => meals.includes(m));
+  const safeMeals = order.length ? order : ['저녁'];
+
+  let prev = { bap: '', guk: '', main: '', banchan: [], breakfast: '' };
+
   const week = WEEKDAYS.map(day => {
-    if (eatOutDays.includes(day)) {
-      return { day, eatOut: true };
+    if (eatOutDays.includes(day)) return { day, eatOut: true };
+
+    const usedToday = []; // 이 날 모든 끼니에서 쓴 메뉴 이름 (끼니 간 겹침 방지)
+    const byMeal = {};
+
+    for (const meal of safeMeals) {
+      if (meal === '아침') {
+        // 간단식 1개
+        const b = breakfastRot([prev.breakfast, ...usedToday]);
+        if (b) usedToday.push(b.name);
+        byMeal['아침'] = { simple: b || null };
+        prev.breakfast = b?.name || prev.breakfast;
+      } else if (meal === '점심') {
+        // 밥 + 메인 + 반찬 1개 (국 생략)
+        const bap = riceRot([prev.bap, ...usedToday]);
+        if (bap) usedToday.push(bap.name);
+        const main = mainRot([prev.main, ...usedToday]);
+        if (main) usedToday.push(main.name);
+        const b1 = banchanRot([...prev.banchan, ...usedToday]);
+        if (b1) usedToday.push(b1.name);
+        byMeal['점심'] = { bap, main, banchan: b1 ? [b1] : [], mainEmpty: !main };
+        prev.bap = bap?.name || prev.bap;
+        prev.main = main?.name || prev.main;
+        prev.banchan = b1 ? [b1.name] : prev.banchan;
+      } else {
+        // 저녁 — 밥 + 국 + 메인 + 반찬 2개 (풀세트, 기존 로직)
+        const bap = riceRot([prev.bap, ...usedToday]);
+        if (bap) usedToday.push(bap.name);
+        const guk = gukRot([prev.guk, ...usedToday]);
+        if (guk) usedToday.push(guk.name);
+        const main = mainRot([prev.main, ...usedToday]);
+        if (main) usedToday.push(main.name);
+        const b1 = banchanRot([...prev.banchan, ...usedToday]);
+        if (b1) usedToday.push(b1.name);
+        const b1Method = b1 ? getMethod(b1.name) : null;
+        const sameMethodNames =
+          b1 && b1Method !== '기타'
+            ? pool.banchan.filter(x => getMethod(x.name) === b1Method).map(x => x.name)
+            : [];
+        const b2 = banchanRot([...usedToday, ...prev.banchan, ...sameMethodNames]);
+        if (b2) usedToday.push(b2.name);
+        const banchan = [];
+        for (const b of [b1, b2]) {
+          if (b && !banchan.some(x => x.name === b.name)) banchan.push(b);
+        }
+        byMeal['저녁'] = { bap, guk, main, banchan, mainEmpty: !main, gukEmpty: !guk };
+        prev.bap = bap?.name || prev.bap;
+        prev.guk = guk?.name || prev.guk;
+        prev.main = main?.name || prev.main;
+        prev.banchan = banchan.map(b => b.name);
+      }
     }
 
-    const bap = riceRot([prev.bap]);        // 어제 밥과 다르게
-    const guk = gukRot([prev.guk]);         // 어제 국과 다르게
-    const main = mainRot([prev.main]);      // 어제 메인과 다르게
-
-    // 반찬 2개 — 서로 다르게 + 어제와 안 겹치게 + 가능하면 조리법도 다르게
-    const b1 = banchanRot([...prev.banchan]);
-    const usedToday = b1 ? [b1.name] : [];
-    // b1과 조리법이 같은 반찬은 피함 ('기타'끼리는 겹쳐도 OK라 제약 안 검). 후보 부족하면 로테이터가 그래도 채움.
-    const b1Method = b1 ? getMethod(b1.name) : null;
-    const sameMethodNames =
-      b1 && b1Method !== '기타'
-        ? pool.banchan.filter(x => getMethod(x.name) === b1Method).map(x => x.name)
-        : [];
-    const b2 = banchanRot([...usedToday, ...prev.banchan, ...sameMethodNames]);
-
-    // 후보가 1개뿐이라 b1·b2가 같은 반찬이면 → 하나만
-    const banchan = [];
-    for (const b of [b1, b2]) {
-      if (b && !banchan.some(x => x.name === b.name)) banchan.push(b);
-    }
-
-    prev = {
-      bap: bap?.name || '',
-      guk: guk?.name || '',
-      main: main?.name || '',
-      banchan: banchan.map(b => b.name),
-    };
-
-    return {
-      day,
-      eatOut: false,
-      bap,
-      guk,
-      main,
-      banchan,
-      mainEmpty: !main,
-      gukEmpty: !guk,   // 추가: 국 빈칸도 알려줌
-    };
+    return { day, eatOut: false, byMeal };
   });
 
   return week;

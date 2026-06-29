@@ -1493,26 +1493,23 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
     );
   }
 
-  // 별미 day — 한 줄로
+  // 별미 day — 다른 요일처럼 깔끔하게: "별미" 표시 + 메뉴 이름 + 이모지만 (역할 라벨·재료 나열 제거)
   if (day.special) {
     const sp = day.sp;
     const bv = ROLE_STYLE["별미"];
     return (
       <div className={ROW} style={ROW_STYLE}>
         {label()}
-        <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 px-3 py-2.5">
-          <span className="text-[9px] font-bold" style={{ color: bv.fg }}>{sp.tag || "색다른"}</span>
+        <div className="flex flex-1 flex-wrap items-center gap-x-2 gap-y-0.5 px-3.5 py-3">
+          <span className="text-[9px] font-bold" style={{ color: bv.fg }}>별미</span>
           <button
             onClick={() => onOpen(sp.menu)}
             title={sp.menu}
-            className="text-left text-[13px] font-extrabold leading-snug transition-opacity hover:opacity-70"
+            className="text-left text-[14px] font-extrabold leading-snug transition-opacity hover:opacity-70"
             style={{ color: bv.fg }}
           >
             {sp.emoji} {sp.menu}
           </button>
-          {sp.shop && sp.shop.length > 0 && (
-            <span className="text-[10px] leading-tight" style={{ color: C.sub }}>🛒 {sp.shop.join(", ")}</span>
-          )}
         </div>
       </div>
     );

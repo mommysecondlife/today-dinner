@@ -975,7 +975,7 @@ export default function RealHomeMeal() {
               </div>
 
               {/* 🛒 장보기 — 냉장고에 있는 것 / 사야 할 것 / 하나만 더 사면 되는 메뉴를 한 흐름으로 */}
-              <ShoppingHub fridge={selected} shopItems={shoppingList} oneMoreGroups={oneMoreGroups} onPickMenu={setPickDayFor} />
+              <ShoppingHub fridge={selected} shopItems={shoppingList} oneMoreGroups={oneMoreGroups} onPickMenu={setPickDayFor} onRemoveFridge={toggleIngredient} />
 
               <p className="pb-1 text-center text-[12px]" style={{ color: C.sub }}>엄마도 매일 잘 해내고 있어요 🍀</p>
             </div>
@@ -1302,7 +1302,7 @@ function PlanControls({ meals, onToggleMeal, restDays, onToggleRestDay, specialF
 
 // 🛒 장보기 허브 — 한 카드 안에 (a)냉장고에 있는 것 / (b)사야 할 것 / (c)하나만 더 사면 되는 메뉴
 //  각 소제목으로 구분해 "장보기"라는 한 흐름으로 읽히게. 기능·로직·링크는 기존 그대로.
-function ShoppingHub({ fridge, shopItems, oneMoreGroups, onPickMenu }) {
+function ShoppingHub({ fridge, shopItems, oneMoreGroups, onPickMenu, onRemoveFridge }) {
   const Divider = () => <div className="my-4 h-px" style={{ background: `${C.gold}22` }} />;
   return (
     <section className="rounded-3xl p-5" style={{ background: C.card, border: `1px solid ${C.gold}40` }}>
@@ -1316,18 +1316,24 @@ function ShoppingHub({ fridge, shopItems, oneMoreGroups, onPickMenu }) {
       <div className="mt-3.5">
         <h3 className="text-[13.5px] font-bold" style={{ color: C.ink }}>🧊 냉장고에 있는 것</h3>
         <p className="mb-2 mt-0.5 text-[11.5px]" style={{ color: C.sub }}>
-          {fridge.length > 0 ? "지금 담아둔 재료예요" : "아직 담은 재료가 없어요"}
+          {fridge.length > 0 ? "지금 담아둔 재료예요 · 다 떨어졌으면 X로 빼기" : "아직 담은 재료가 없어요"}
         </p>
         {fridge.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {fridge.map((name) => (
-              <span
+              <button
                 key={name}
-                className="inline-flex items-center rounded-full py-1.5 px-3 text-[12.5px] font-semibold"
+                onClick={() => onRemoveFridge(name)}
+                aria-label={`${name} 빼기`}
+                title="다 떨어졌어요 (빼기)"
+                className="inline-flex items-center gap-1 rounded-full py-1.5 pl-3 pr-1.5 text-[12.5px] font-semibold transition-all hover:opacity-80"
                 style={{ background: C.sageSoft, color: C.sage, border: `1px solid ${C.sage}33` }}
               >
                 {name}
-              </span>
+                <span className="flex h-4 w-4 items-center justify-center rounded-full" style={{ background: `${C.sage}26` }}>
+                  <X size={10} strokeWidth={3.2} />
+                </span>
+              </button>
             ))}
           </div>
         )}

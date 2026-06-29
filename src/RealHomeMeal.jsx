@@ -4,6 +4,7 @@ import * as htmlToImage from "html-to-image";
 import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealData.js";
 import { generateWeekPlan } from "./generateWeekPlan.js";
 import { parseReceiptText } from "./receiptParser.js";
+import Tesseract from "tesseract.js";
 
 /* ------------------------------------------------------------------ *
  *  오늘 뭐 먹지? (현실 집밥 편)
@@ -1776,11 +1777,16 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
   const [ignored, setIgnored] = useState([]); // 무시한 줄(양념 등)
   const [checked, setChecked] = useState({}); // { name: bool }
   const [draft, setDraft] = useState(""); // 직접 추가 입력
+  const [ocrBusy, setOcrBusy] = useState(false); // 사진 OCR 진행 중
+  const [ocrPct, setOcrPct] = useState(0); // OCR 진행률 %
+  const cameraInputRef = useRef(null); // 📷 후면 카메라 바로 켜기
+  const galleryInputRef = useRef(null); // 🖼️ 갤러리에서 선택
 
   useEffect(() => {
     if (open) return;
     // 닫히면 초기화
     setStep("input"); setText(""); setMatched([]); setIgnored([]); setChecked({}); setDraft("");
+    setOcrBusy(false); setOcrPct(0);
   }, [open]);
   useEffect(() => {
     if (!open) return;
@@ -1789,6 +1795,27 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
   if (!open) return null;
+
+  // 사진 → tesseract.js 한국어 OCR → 추출 텍스트를 textarea에 채움 (그 뒤는 기존 흐름 재사용)
+  const onPhoto = async (e) => {
+    const file = e.target.files && e.target.files[0];
+    e.target.value = ""; // 같은 사진 다시 선택 가능하게 초기화
+    if (!file) return;
+    setOcrBusy(true);
+    setOcrPct(0);
+    try {
+      const { data } = await Tesseract.recognize(file, "kor", {
+        logger: (m) => { if (m.status === "recognizing text") setOcrPct(Math.round((m.progress || 0) * 100)); },
+      });
+      const extracted = (data.text || "").trim();
+      setText((prev) => (prev.trim() ? prev.trim() + "\n" + extracted : extracted));
+    } catch (err) {
+      console.error("OCR failed:", err);
+      alert("사진을 읽지 못했어요. 다시 찍거나 텍스트로 붙여넣어 주세요 🙏");
+    } finally {
+      setOcrBusy(false);
+    }
+  };
 
   const runParse = () => {
     const { matched: m, ignored: ig } = parseReceiptText(text);
@@ -1837,10 +1864,45 @@ function ReceiptSheet({ open, onClose, selected, onAdd, reduced }) {
 
         {step === "input" ? (
           <div className="flex flex-col gap-3 overflow-y-auto px-5 pb-5 pt-2">
-            {/* 📷 (나중에) 사진 OCR 자리: 여기서 텍스트를 채워 setText() 하면 그대로 이어짐 */}
+            {/* 📷 사진 입구 — 카메라 촬영 / 갤러리 선택 → OCR로 텍스트 추출 */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => cameraInputRef.current && cameraInputRef.current.click()}
+                disabled={ocrBusy}
+                className="flex flex-1 items-center justify-center gap-1.5 rounded-2xl py-3 text-[13.5px] font-bold transition-all"
+                style={{ background: ocrBusy ? C.line : C.gold, color: "#fff", boxShadow: ocrBusy ? "none" : "0 12px 24px -16px rgba(217,96,63,0.9)" }}
+              >
+                📷 영수증 사진 찍기
+              </button>
+              <button
+                onClick={() => galleryInputRef.current && galleryInputRef.current.click()}
+                disabled={ocrBusy}
+                className="flex shrink-0 items-center justify-center gap-1 rounded-2xl px-4 py-3 text-[13.5px] font-bold transition-all"
+                style={{ background: "#fff", color: C.gold, border: `1px solid ${C.gold}55`, opacity: ocrBusy ? 0.5 : 1 }}
+              >
+                🖼️ 사진 선택
+              </button>
+            </div>
+            {/* 후면 카메라 바로 켜기(capture) / 갤러리(capture 없음). PC는 둘 다 파일 선택으로 동작 */}
+            <input ref={cameraInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={onPhoto} />
+            <input ref={galleryInputRef} type="file" accept="image/*" className="hidden" onChange={onPhoto} />
+
+            {ocrBusy && (
+              <div className="flex items-center justify-center gap-2 rounded-2xl py-3 text-[13.5px] font-bold" style={{ background: C.goldSoft, color: C.gold }}>
+                <span className={reduced ? "" : "bounce-food"}>🔍</span>
+                영수증 읽는 중… {ocrPct > 0 ? `${ocrPct}%` : ""}
+              </div>
+            )}
+
+            <div className="flex items-center gap-2">
+              <span className="h-px flex-1" style={{ background: C.line }} />
+              <span className="text-[11px] font-semibold" style={{ color: C.sub }}>또는 텍스트로</span>
+              <span className="h-px flex-1" style={{ background: C.line }} />
+            </div>
+
             <p className="text-[12.5px] leading-relaxed" style={{ color: C.sub }}>
               마트 영수증 내용이나 쿠팡 주문내역을 붙여넣으세요.<br />
-              상품명에서 재료를 자동으로 찾아드려요 (양념·기타는 빼고요).
+              사진을 찍으면 글자를 읽어 아래 칸에 채워드려요 (틀린 글자는 직접 고칠 수 있어요).
             </p>
             <textarea
               value={text}

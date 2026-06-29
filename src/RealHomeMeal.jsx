@@ -809,7 +809,7 @@ export default function RealHomeMeal() {
                     </span>
                   </div>
                   {/* 위클리 플래너 — 요일별 가로 줄(월~일 세로로 쌓임) + 맨 아래 MEMO */}
-                  <div className="mt-3 space-y-2">
+                  <div className="mt-3 space-y-2.5">
                     {weekPlan.map((d) => (
                       <DayCell key={d.day} day={d} dateNum={weekDates[d.day]} onOpen={setActiveMenu} onSwap={swapCell} swapPools={swapPools} />
                     ))}
@@ -1444,20 +1444,25 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
     </div>
   );
 
-  // 한 메뉴: 이름(탭→레시피) + 같은 역할에 다른 후보 있으면 작은 🔄(탭→교체)
+  // 메뉴 위계 — 메인: 가장 진하고 크게 / 밥·국: 중간 / 반찬: 작고 연하게
+  const tierOf = (role) =>
+    role === "메인" ? { fontSize: "14px", fontWeight: 800, color: MAIN_TXT }
+    : role === "반찬" ? { fontSize: "11.5px", fontWeight: 500, color: "#8A7565" }
+    : { fontSize: "12.5px", fontWeight: 700, color: SUB_TXT }; // 밥·국
+
+  // 한 메뉴: 이름(탭→레시피) + 같은 역할에 다른 후보 있으면 🔄(평소 숨김, hover/탭에서 노출)
   const dish = (it, idx) => {
-    const strong = it.role === "메인";
-    const base = strong ? MAIN_TXT : SUB_TXT;
+    const t = tierOf(it.role);
     const canSwap = !!onSwap && (swapPools?.[it.role]?.length || 0) > 1;
     return (
-      <span key={idx} className="inline-flex items-center gap-0.5">
+      <span key={idx} className="inline-flex items-center gap-1">
         <button
           onClick={() => onOpen(it.menu)}
           title={it.menu}
           className="text-left leading-snug transition-colors"
-          style={{ color: base, fontSize: strong ? "13px" : "12.5px", fontWeight: strong ? 800 : 600 }}
+          style={{ color: t.color, fontSize: t.fontSize, fontWeight: t.fontWeight }}
           onMouseEnter={(e) => (e.currentTarget.style.color = C.gold)}
-          onMouseLeave={(e) => (e.currentTarget.style.color = base)}
+          onMouseLeave={(e) => (e.currentTarget.style.color = t.color)}
         >
           {it.menu}
         </button>
@@ -1466,10 +1471,10 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
             onClick={() => onSwap(day.day, idx, it.role, it.menu)}
             title="다른 메뉴로 바꾸기"
             aria-label={`${it.menu} 다른 메뉴로 바꾸기`}
-            className="shrink-0 leading-none opacity-35 transition-opacity hover:opacity-90"
-            style={{ fontSize: "10px" }}
+            className="swap-btn flex shrink-0 items-center leading-none"
+            style={{ color: C.sub }}
           >
-            🔄
+            <RefreshCw size={11} strokeWidth={2.4} />
           </button>
         )}
       </span>
@@ -1527,14 +1532,14 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
     );
 
   return (
-    <div className={ROW} style={ROW_STYLE}>
+    <div className={`day-row ${ROW}`} style={ROW_STYLE}>
       {label()}
-      <div className="flex flex-1 flex-col justify-center gap-1 px-3 py-2.5">
+      <div className="flex flex-1 flex-col justify-center gap-1.5 px-3.5 py-3">
         {/* 윗줄: 밥 + 국 */}
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">{topItems.map(renderItem)}</div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{topItems.map(renderItem)}</div>
         {/* 아랫줄: 메인 + 반찬 */}
         {bottomItems.length > 0 && (
-          <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5">{bottomItems.map(renderItem)}</div>
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1">{bottomItems.map(renderItem)}</div>
         )}
       </div>
     </div>

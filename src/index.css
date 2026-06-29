@@ -35,6 +35,25 @@ body {
   font-family: "Paperlogy", system-ui, sans-serif;
 }
 
+/* 🔄 바꾸기 버튼 — 평소엔 숨기고, 마우스 올렸을 때(PC)/탭했을 때(모바일)만 은은하게 (차분한 회색) */
+.swap-btn {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.18s ease;
+}
+.day-row:hover .swap-btn,
+.day-row:focus-within .swap-btn {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+/* 터치 기기(hover 없음): 한 줄 탭하면 그 줄의 바꾸기 버튼이 은은하게 떠오름 */
+@media (hover: none) {
+  .day-row:focus-within .swap-btn {
+    opacity: 0.6;
+    pointer-events: auto;
+  }
+}
+
 /* 냉장고 — 재료 담기 인터랙션 애니메이션 */
 @keyframes floatUp {
   0% {

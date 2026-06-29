@@ -569,13 +569,14 @@ export default function RealHomeMeal() {
 
   const cookingDays = weekPlan.filter((d) => !d.rest).length;
 
-  // 이번 주(월~일) 실제 날짜 — 앱 여는 시점(new Date()) 기준, 월요일 시작. { 월: 30, 화: 1, ... }
+  // 이번 주(월~일) 실제 날짜 — 앱 여는 시점(new Date()) 기준, 월요일 시작. { 월: "6/29", 화: "6/30", ... }
   const weekDates = useMemo(() => {
     const today = new Date();
     const monday = new Date(today.getFullYear(), today.getMonth(), today.getDate() - ((today.getDay() + 6) % 7));
     const map = {};
     ["월", "화", "수", "목", "금", "토", "일"].forEach((d, i) => {
-      map[d] = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i).getDate();
+      const dt = new Date(monday.getFullYear(), monday.getMonth(), monday.getDate() + i);
+      map[d] = `${dt.getMonth() + 1}/${dt.getDate()}`;
     });
     return map;
   }, []);

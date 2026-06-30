@@ -3,6 +3,7 @@ import { ChefHat, ShoppingCart, Check, CalendarDays, Sparkles, X, Timer, Hand, R
 import * as htmlToImage from "html-to-image";
 import { INGREDIENT_CATEGORIES, SEASONAL, SEASONAL_INFO, MENUS } from "./mealData.js";
 import { generateWeekPlan } from "./generateWeekPlan.js";
+import { MEALKIT_CATEGORIES } from "./mealkitData.js";
 import { parseReceiptText } from "./receiptParser.js";
 import Tesseract, { PSM } from "tesseract.js";
 // 페이퍼로지 폰트 파일 — 캡처(html-to-image) 시 base64로 인라인 임베드해 한글 깨짐 방지
@@ -56,6 +57,11 @@ const C = {
   sageSoft: "#EAF0DC", // 연한 새싹 배경
   yolk: "#E8A33D",     // 노른자 옐로 (보조 강조)
 };
+
+// 🧊 밀키트(냉동실) 톤 — 차가운 블루. "요리 안 하는 날" 강조용
+const ICY = "#4A7CA6";
+const ICY_SOFT = "#EAF2F8";
+const ICY_BD = "#C2DAEA";
 
 // 식단표 하단 액션 버튼 — 하나의 위계로 통일 (메인=코랄 솔리드 / 보조=흰 배경+코랄 아웃라인)
 //  크기·둥글기·아이콘·여백 동일. 코랄 + 흰색, 두 색 안에서만.
@@ -270,6 +276,23 @@ export default function RealHomeMeal() {
   const [sheetOpen, setSheetOpen] = useState(false); // 재료 바꾸기 시트
   const [receiptOpen, setReceiptOpen] = useState(false); // 📝 영수증/주문내역 담기 시트
   const [customIngredients, setCustomIngredients] = useState([]); // 직접 추가 [{name, cat}]
+  // 🧊 우리집 냉동실 밀키트 — selected 재료와 별도 state, localStorage 저장
+  const [myMealkits, setMyMealkits] = useState(() => {
+    try {
+      const raw = localStorage.getItem("td_mealkits");
+      return raw ? JSON.parse(raw) : [];
+    } catch {
+      return [];
+    }
+  });
+  useEffect(() => {
+    try {
+      localStorage.setItem("td_mealkits", JSON.stringify(myMealkits));
+    } catch { /* 저장 불가 환경 무시 */ }
+  }, [myMealkits]);
+  const toggleMealkit = (name) =>
+    setMyMealkits((prev) => (prev.includes(name) ? prev.filter((n) => n !== name) : [...prev, name]));
+  const removeMealkit = (name) => setMyMealkits((prev) => prev.filter((n) => n !== name));
   const [findQuery, setFindQuery] = useState(""); // 🔎 메뉴찾기 탭 재료 검색어
   const [generating, setGenerating] = useState(false); // 식단 짜는 중 (로딩 연출)
   const [loadingStep, setLoadingStep] = useState(0); // 로딩 메시지 인덱스
@@ -484,8 +507,26 @@ export default function RealHomeMeal() {
   const baseWeekPlan = useMemo(() => {
     const base = generateWeekPlan(MENUS, selected, { eatOutDays: restDays, excludeSpicy, meals });
 
+    // 🧊 밀키트 데이 — 등록된 밀키트가 있으면 집밥 날 중 1~2일을 "요리 안 하는 날"로 (외식 day와 유사, 밀키트명 표시).
+    //  등록 수 1~2개면 1일, 3개 이상이면 2일. 등록이 없으면 0일(기존 식단 그대로).
+    const mealkitCandidates = base.filter((d) => !d.eatOut).map((d) => d.day);
+    const mealkitCount = myMealkits.length === 0 ? 0 : Math.min(myMealkits.length >= 3 ? 2 : 1, mealkitCandidates.length);
+    const mealkitDays = new Map(); // 요일 → 밀키트명
+    if (mealkitCount > 0) {
+      const kits = [...myMealkits];
+      for (let i = kits.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [kits[i], kits[j]] = [kits[j], kits[i]]; }
+      for (let i = 0; i < mealkitCount; i++) {
+        let idx = Math.round(((i + 0.7) / Math.max(1, mealkitCount)) * mealkitCandidates.length - 0.5);
+        idx = ((idx % mealkitCandidates.length) + mealkitCandidates.length) % mealkitCandidates.length;
+        let g = 0;
+        while (mealkitDays.has(mealkitCandidates[idx]) && g < mealkitCandidates.length) { idx = (idx + 1) % mealkitCandidates.length; g++; }
+        mealkitDays.set(mealkitCandidates[idx], kits[i % kits.length]);
+      }
+    }
+
     // 색다른(별미) — needShopping 단품. 슬라이더 빈도만큼 집밥 날에 분산. 단, 저녁이 선택됐을 때만(저녁 자리에 들어감).
-    const cookingList = base.filter((d) => !d.eatOut).map((d) => d.day);
+    //  밀키트 데이는 별미 후보에서 제외(겹치지 않게).
+    const cookingList = base.filter((d) => !d.eatOut && !mealkitDays.has(d.day)).map((d) => d.day);
     const dinnerSelected = meals.includes("저녁");
     const wantDanpum =
       !dinnerSelected ? 0
@@ -519,6 +560,7 @@ export default function RealHomeMeal() {
     // generateWeekPlan 결과 → 렌더용 구조로 변환 (+ 별미 덮어쓰기)
     return base.map((d) => {
       if (d.eatOut) return { day: d.day, rest: true };
+      if (mealkitDays.has(d.day)) return { day: d.day, mealkit: true, mealkitName: mealkitDays.get(d.day) };
       // 별미는 "저녁"에만 — 저녁이 있는 집밥 날에만 저녁 자리를 별미로 대체. 아침·점심은 평범하게.
       const danpumMenu = danpumDays.has(d.day) && d.byMeal?.["저녁"] ? pickDanpum() : null;
       // 끼니별 한 상 → 칩 렌더용 items 배열로 (각 item에 meal 태그). 끼니 순서: 아침→점심→저녁.
@@ -647,7 +689,8 @@ export default function RealHomeMeal() {
     [swapPools, weekPlan]
   );
 
-  const cookingDays = weekPlan.filter((d) => !d.rest).length;
+  const cookingDays = weekPlan.filter((d) => !d.rest && !d.mealkit).length;
+  const mealkitDayCount = weekPlan.filter((d) => d.mealkit).length;
 
   // ─── 추천 메뉴 → 선택한 요일 식단에 바로 꽂기 (+ 부족 재료 자동 담기) ───
   const [pickDayFor, setPickDayFor] = useState(null); // 요일 선택 모달에 띄울 추천 메뉴명
@@ -704,7 +747,7 @@ export default function RealHomeMeal() {
     const need = [];
     const add = (name) => missingIngredients(MENU_BY_NAME[name], sel).forEach((i) => { if (!need.includes(i)) need.push(i); });
     weekPlan.forEach((d) => {
-      if (d.rest) return;
+      if (d.rest || d.mealkit) return; // 외식·밀키트 날은 장보기 불필요
       if (d.special) { add(d.sp.menu); return; }
       d.items.forEach((it) => { if (!it.placeholder) add(it.menu); });
     });
@@ -850,6 +893,9 @@ export default function RealHomeMeal() {
                 </button>
               </Card>
 
+              {/* 섹션 1.5 — 우리집 냉동실 밀키트 (요리 안 하는 날) */}
+              <MealkitSection registered={myMealkits} onToggle={toggleMealkit} onRemove={removeMealkit} />
+
               {/* 섹션 2 — 식단 설정 */}
               <Card>
                 <SectionTitle icon={<span className="text-[15px]">⚙️</span>} label="식단 설정" />
@@ -928,7 +974,7 @@ export default function RealHomeMeal() {
                   <div className="flex items-center justify-between px-0.5">
                     <SectionTitle icon={<CalendarDays size={16} />} label="이번 주 식단표" noMargin />
                     <span className="text-[12px]" style={{ color: C.sub }}>
-                      집밥 {cookingDays}일 · 외식 {restDays.length}일
+                      집밥 {cookingDays}일 · 외식 {restDays.length}일{mealkitDayCount > 0 ? ` · 🧊 밀키트 ${mealkitDayCount}일` : ""}
                     </span>
                   </div>
                   {/* 위클리 플래너 — 요일별 가로 줄(월~일 세로로 쌓임) */}
@@ -1129,7 +1175,7 @@ export default function RealHomeMeal() {
         (() => {
           const role = ROLE_KO[MENU_BY_NAME[pickDayFor]?.role] || "메인";
           const days = weekPlan
-            .filter((d) => !d.rest && !d.special)
+            .filter((d) => !d.rest && !d.special && !d.mealkit)
             .map((d) => ({
               day: d.day,
               date: weekDates[d.day],
@@ -1430,6 +1476,88 @@ function ShoppingHub({ fridge, shopItems, oneMoreGroups, onPickMenu, onRemoveFri
   );
 }
 
+// 🧊 우리집 냉동실 밀키트 — 카테고리별 항목 등록(체크)/해제(X). selected와 별도, localStorage 저장.
+function MealkitSection({ registered, onToggle, onRemove }) {
+  const [open, setOpen] = useState(false);
+  const regSet = new Set(registered);
+  return (
+    <Card>
+      <button onClick={() => setOpen((o) => !o)} className="flex w-full items-center justify-between">
+        <SectionTitle icon={<span className="text-[15px]">🧊</span>} label="우리집 냉동실 밀키트" noMargin />
+        <span className="flex items-center gap-1 text-[12px]" style={{ color: C.sub }}>
+          {registered.length > 0 ? `${registered.length}개 쟁여둠` : "등록"}
+          <ChevronDown size={16} style={{ transform: open ? "rotate(180deg)" : "none", transition: "transform .2s" }} />
+        </span>
+      </button>
+      <p className="mt-1 text-[11.5px] leading-snug" style={{ color: C.sub }}>
+        방학 땐 냉동실 밀키트로 <b style={{ color: ICY }}>요리 안 하는 날</b>을 만들어요 · 식단에 자동으로 섞여요
+      </p>
+
+      {/* 등록된 밀키트 (항상 보임) */}
+      {registered.length > 0 && (
+        <div className="mt-2.5 flex flex-wrap gap-1.5">
+          {registered.map((name) => (
+            <button
+              key={name}
+              onClick={() => onRemove(name)}
+              aria-label={`${name} 빼기`}
+              className="inline-flex items-center gap-1 rounded-full py-1 pl-2.5 pr-1.5 text-[12px] font-semibold"
+              style={{ background: ICY, color: "#fff" }}
+            >
+              🧊 {name}
+              <span className="flex h-4 w-4 items-center justify-center rounded-full" style={{ background: "rgba(255,255,255,0.28)" }}>
+                <X size={10} strokeWidth={3.2} />
+              </span>
+            </button>
+          ))}
+        </div>
+      )}
+
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="mt-3 flex w-full items-center justify-center gap-1.5 rounded-2xl py-2.5 text-[13px] font-bold"
+        style={{ background: ICY_SOFT, color: ICY, border: `1px solid ${ICY_BD}` }}
+      >
+        {open ? "접기" : "➕ 냉동실에 쟁여둔 밀키트 고르기"}
+      </button>
+
+      {open && (
+        <div className="mt-3 space-y-3.5">
+          {MEALKIT_CATEGORIES.map((cat) => (
+            <div key={cat.category}>
+              <p className="text-[12.5px] font-bold" style={{ color: C.ink }}>
+                {cat.emoji} {cat.category}
+                <span className="ml-1.5 text-[10.5px] font-medium" style={{ color: C.sub }}>{cat.desc}</span>
+              </p>
+              <div className="mt-1.5 space-y-1.5">
+                {cat.items.map((it) => {
+                  const on = regSet.has(it.name);
+                  return (
+                    <button
+                      key={it.name}
+                      onClick={() => onToggle(it.name)}
+                      className="flex w-full items-center gap-2 rounded-xl px-3 py-2 text-left transition-all"
+                      style={{ background: on ? ICY_SOFT : "#fff", border: `1px solid ${on ? ICY_BD : C.line}` }}
+                    >
+                      <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full" style={{ background: on ? ICY : "#EFEAE2", color: "#fff" }}>
+                        {on ? <Check size={12} strokeWidth={3} /> : <span className="text-[13px] leading-none" style={{ color: C.sub }}>＋</span>}
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="text-[13px] font-bold" style={{ color: C.ink }}>{it.name}</span>
+                        <span className="block truncate text-[10.5px] leading-tight" style={{ color: C.sub }}>{it.examples}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 // 📅 추천 메뉴를 넣을 요일 고르기 (바텀시트) — 집밥 날만, 같은 역할 자리에 들어감을 미리보기
 function DayPickerSheet({ menu, role, days, onPick, onClose, reduced }) {
   return (
@@ -1700,6 +1828,20 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
         {label()}
         <div className="flex flex-1 items-center px-3 py-2.5">
           <span className="text-[12.5px] font-bold" style={{ color: C.sub }}>외식 day 🍴</span>
+        </div>
+      </div>
+    );
+  }
+
+  // 🧊 밀키트 데이 — 요리 안 하는 날. 냉동실 밀키트 하나로 (외식 day와 유사, 차가운 블루 톤)
+  if (day.mealkit) {
+    return (
+      <div className={ROW} style={{ ...ROW_STYLE, background: ICY_SOFT, border: `1px solid ${ICY_BD}` }}>
+        {label()}
+        <div className="flex flex-1 flex-col justify-center px-3.5 py-2.5">
+          <span className="text-[10.5px] font-bold leading-tight" style={{ color: ICY }}>🧊 오늘은 냉동실 찬스!</span>
+          <span className="text-[13.5px] font-extrabold leading-snug" style={{ color: C.ink }}>{day.mealkitName}</span>
+          <span className="text-[9.5px] leading-tight" style={{ color: C.sub }}>요리 안 해도 돼요 😌</span>
         </div>
       </div>
     );

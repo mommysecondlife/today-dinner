@@ -598,9 +598,10 @@ export default function RealHomeMeal() {
       const totalMin = cook.length ? Math.max(...cook.map((it) => getMeta(it.menu).min)) + (cook.length - 1) * 3 : 0;
       return { day: d.day, mealName: primaryMeal, items, totalMin, multiMeal: mealsInDay.length > 1 };
     });
-    // 의존성은 regen만 — "식단 짜기/다시 짜기"로만 새로 생성(스냅샷). 추천 메뉴 꽂기로 selected가 바뀌어도
-    // 전체 식단이 다시 섞이지 않게(=꽂은 칸만 바뀌게) 한다. 생성 시점의 selected/설정값은 클로저로 읽음.
-  }, [regen]); // eslint-disable-line react-hooks/exhaustive-deps
+    // 의존성 = regen + cookDays. "식단 짜기/다시 짜기"(regen)로 새로 섞고, "메뉴 필요한 날"을 바꾸면
+    // 곧바로 반영돼 고른 날에 식단이 차게 한다(스냅샷 staleness 방지). selected(재료 담기/추천 꽂기)는
+    // 클로저로만 읽어 전체 식단이 다시 섞이지 않게 유지.
+  }, [regen, cookDays]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // ─── 칸별 "바꾸기" — 이미 짜인 식단표에서 메뉴 한 칸만 같은 역할의 다른 메뉴로 교체 ───
   //  generateWeekPlan/매칭/데이터는 건드리지 않고, baseWeekPlan 위에 override만 덮어씌운다.
@@ -621,7 +622,7 @@ export default function RealHomeMeal() {
   useEffect(() => {
     setCellSwaps({});
     setPlanInserts({});
-  }, [regen]);
+  }, [regen, cookDays]);
 
   // baseWeekPlan + cellSwaps + planInserts → 실제로 렌더/장보기/추천에 쓰는 weekPlan
   const weekPlan = useMemo(() => {
@@ -947,7 +948,7 @@ export default function RealHomeMeal() {
                 🧺 재료 설정하러 가기
               </button>
             </div>
-          ) : hasPlan && cookingDays === 0 ? (
+          ) : hasPlan && cookDays.length === 0 ? (
             <div className="flex flex-col items-center justify-center text-center" style={{ minHeight: "55vh" }}>
               <div className="text-[46px] leading-none">🍳</div>
               <p className="mt-3 text-[14.5px] font-bold" style={{ color: C.ink }}>요리할 날을 선택해주세요</p>
@@ -992,7 +993,7 @@ export default function RealHomeMeal() {
                   <div className="flex items-center justify-between px-0.5">
                     <SectionTitle icon={<CalendarDays size={16} />} label="이번 주 식단표" noMargin />
                     <span className="text-[12px]" style={{ color: C.sub }}>
-                      집밥 {cookingDays}일{offDayCount > 0 ? ` · 쉬어가는 날 ${offDayCount}일` : ""}{mealkitDayCount > 0 ? ` · 🧊 밀키트 ${mealkitDayCount}일` : ""}
+                      집밥 {cookingDays}일{offDayCount > 0 ? ` · 자유 ${offDayCount}일` : ""}{mealkitDayCount > 0 ? ` · 🧊 밀키트 ${mealkitDayCount}일` : ""}
                     </span>
                   </div>
                   {/* 위클리 플래너 — 요일별 가로 줄(월~일 세로로 쌓임) */}
@@ -1839,13 +1840,13 @@ function DayCell({ day, dateNum, onOpen, onSwap, swapPools }) {
     );
   };
 
-  // 쉬어가는 날 — "메뉴 필요한 날"에서 안 켠 요일. 옅게 표시(요리 안 하는 날)
+  // 자유롭게 — "메뉴 필요한 날"에서 안 켠 요일. 7일 틀은 유지하고 메뉴 자리에만 옅은 안내
   if (day.rest) {
     return (
       <div className={ROW} style={{ ...ROW_STYLE, background: "#FAF7F2", border: `1px solid ${C.line}` }}>
         {label()}
         <div className="flex flex-1 items-center px-3 py-2.5">
-          <span className="text-[12px] font-semibold" style={{ color: FAINT }}>이 날은 쉬어가요 💤</span>
+          <span className="text-[12px] font-semibold" style={{ color: FAINT }}>🍴 자유롭게 <span className="font-medium">(외식·밀키트·간단히)</span></span>
         </div>
       </div>
     );
